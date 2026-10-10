@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "data_source": "live",
+  "boot_id": "9cc3695de33644ad93c41ba3f6300680",
+  "revision": 25,
+  "sampled_at": "2026-10-10T03:03:28.063Z",
+  "journey": {
+    "id": "f0ae514d-e572-4f32-b7fd-47855b348c7c",
+    "status": "paused",
+    "armed": true,
+    "pause_reason": "help_request",
+    "route_id": "campus_demo_v1",
+    "route_progress": 0.032,
+    "waypoint": "North entrance",
+    "waypoint_index": 0,
+    "location": {
+      "source": "simulated",
+      "latitude": 33.751962,
+      "longitude": -84.384957,
+      "accuracy_m": null,
+      "landmark": "North entrance",
+      "observed_at": "2026-10-10T03:03:28.058Z"
+    },
+    "created_at": "2026-10-10T03:03:13.990Z",
+    "version": 7
+  },
+  "active_incident": null,
+  "last_incident": {
+    "id": "94ec73aa-41e5-4f3b-a3b4-f037e1c3ef4b",
+    "status": "cancelled",
+    "request_source": "button",
+    "created_at": "2026-10-10T03:03:28.057Z",
+    "dispatch_at": "2026-10-10T03:03:38.057Z",
+    "seconds_until_dispatch": null,
+    "acknowledged_at": null,
+    "updated_at": "2026-10-10T03:03:28.061Z",
+    "version": 2
+  },
+  "vision": {
+    "input_mode": "unavailable",
+    "ready": false,
+    "obstruction_active": false,
+    "obstruction_source": null,
+    "last_observed_at": null,
+    "error": "vision not configured (set GUIDEWING_VISION_SOURCE)"
+  }
+}

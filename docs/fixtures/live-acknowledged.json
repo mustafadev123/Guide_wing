@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "data_source": "live",
+  "boot_id": "9cc3695de33644ad93c41ba3f6300680",
+  "revision": 20,
+  "sampled_at": "2026-10-10T03:03:28.051Z",
+  "journey": {
+    "id": "f0ae514d-e572-4f32-b7fd-47855b348c7c",
+    "status": "paused",
+    "armed": true,
+    "pause_reason": "help_request",
+    "route_id": "campus_demo_v1",
+    "route_progress": 0.032,
+    "waypoint": "North entrance",
+    "waypoint_index": 0,
+    "location": {
+      "source": "simulated",
+      "latitude": 33.751962,
+      "longitude": -84.384957,
+      "accuracy_m": null,
+      "landmark": "North entrance",
+      "observed_at": "2026-10-10T03:03:17.025Z"
+    },
+    "created_at": "2026-10-10T03:03:13.990Z",
+    "version": 5
+  },
+  "active_incident": {
+    "id": "cb7d8593-c6e7-4fdb-b5b1-8fa427e4a940",
+    "status": "acknowledged",
+    "request_source": "button",
+    "created_at": "2026-10-10T03:03:17.023Z",
+    "dispatch_at": "2026-10-10T03:03:27.023Z",
+    "seconds_until_dispatch": null,
+    "acknowledged_at": "2026-10-10T03:03:28.047Z",
+    "updated_at": "2026-10-10T03:03:28.047Z",
+    "version": 3
+  },
+  "last_incident": {
+    "id": "cb7d8593-c6e7-4fdb-b5b1-8fa427e4a940",
+    "status": "acknowledged",
+    "request_source": "button",
+    "created_at": "2026-10-10T03:03:17.023Z",
+    "dispatch_at": "2026-10-10T03:03:27.023Z",
+    "seconds_until_dispatch": null,
+    "acknowledged_at": "2026-10-10T03:03:28.047Z",
+    "updated_at": "2026-10-10T03:03:28.047Z",
+    "version": 3
+  },
+  "vision": {
+    "input_mode": "unavailable",
+    "ready": false,
+    "obstruction_active": false,
+    "obstruction_source": null,
+    "last_observed_at": null,
+    "error": "vision not configured (set GUIDEWING_VISION_SOURCE)"
+  }
+}

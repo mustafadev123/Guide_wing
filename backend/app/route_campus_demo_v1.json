@@ -1,0 +1,10 @@
+{
+  "route_id": "campus_demo_v1",
+  "note": "Illustrative simulation waypoints for the demo. These are NOT surveyed coordinates and are not derived from video or Unreal world units.",
+  "waypoints": [
+    {"name": "North entrance", "latitude": 33.75200, "longitude": -84.38500},
+    {"name": "Library crossing", "latitude": 33.75160, "longitude": -84.38455},
+    {"name": "Fountain plaza", "latitude": 33.75110, "longitude": -84.38440},
+    {"name": "Bus stop", "latitude": 33.75060, "longitude": -84.38470}
+  ]
+}

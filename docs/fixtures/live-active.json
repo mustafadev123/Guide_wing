@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "data_source": "live",
+  "boot_id": "9cc3695de33644ad93c41ba3f6300680",
+  "revision": 10,
+  "sampled_at": "2026-10-10T03:03:15.999Z",
+  "journey": {
+    "id": "f0ae514d-e572-4f32-b7fd-47855b348c7c",
+    "status": "active",
+    "armed": true,
+    "pause_reason": null,
+    "route_id": "campus_demo_v1",
+    "route_progress": 0.0203,
+    "waypoint": "North entrance",
+    "waypoint_index": 0,
+    "location": {
+      "source": "simulated",
+      "latitude": 33.751976,
+      "longitude": -84.384973,
+      "accuracy_m": null,
+      "landmark": "North entrance",
+      "observed_at": "2026-10-10T03:03:15.774Z"
+    },
+    "created_at": "2026-10-10T03:03:13.990Z",
+    "version": 2
+  },
+  "active_incident": null,
+  "last_incident": null,
+  "vision": {
+    "input_mode": "unavailable",
+    "ready": false,
+    "obstruction_active": false,
+    "obstruction_source": null,
+    "last_observed_at": null,
+    "error": "vision not configured (set GUIDEWING_VISION_SOURCE)"
+  }
+}

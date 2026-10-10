@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "data_source": "mock",
+  "boot_id": "mock-boot",
+  "revision": 1,
+  "sampled_at": "2026-10-10T03:03:13.987Z",
+  "journey": {
+    "id": "mock-no-location",
+    "status": "active",
+    "armed": true,
+    "pause_reason": null,
+    "route_id": "campus_demo_v1",
+    "route_progress": 0.42,
+    "waypoint": "Library crossing",
+    "waypoint_index": 1,
+    "location": {
+      "source": "unavailable",
+      "latitude": null,
+      "longitude": null,
+      "accuracy_m": null,
+      "landmark": null,
+      "observed_at": null
+    },
+    "created_at": "2026-10-10T03:02:13.987Z",
+    "version": 3
+  },
+  "active_incident": null,
+  "last_incident": null,
+  "vision": {
+    "input_mode": "test",
+    "ready": false,
+    "obstruction_active": false,
+    "obstruction_source": null,
+    "last_observed_at": null,
+    "error": "mock snapshot: no vision provider"
+  }
+}

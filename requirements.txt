@@ -1,0 +1,32 @@
+# GuideWing Python dependencies (tested with Python 3.14.7 on Windows 11, CPU only).
+# Install with scripts\setup.ps1, which runs these steps in order:
+#   1. torch==2.14.1 torchvision==0.29.1 from https://download.pytorch.org/whl/cpu
+#   2. pip install -r requirements.txt
+#   3. pip install --no-deps ultralytics==8.4.175
+# ultralytics is installed without dependencies on purpose: it would pull
+# opencv-python, while mediapipe needs opencv-contrib-python. Both provide cv2,
+# so only opencv-contrib-python (a superset) is installed. `pip check` therefore
+# reports "ultralytics requires opencv-python" - expected and harmless.
+
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.0
+websockets==17.2
+mediapipe==1.1.0
+opencv-contrib-python==5.0.0.93
+numpy==2.5.2
+
+# ultralytics runtime dependencies (minus opencv-python)
+matplotlib==3.11.2
+pillow==12.3.0
+PyYAML==6.0.3
+requests==2.34.2
+psutil==7.2.2
+polars==2.0.0
+ultralytics-thop==2.2.2
+ultralytics-platform==0.1.83
+nvidia-ml-py==13.615.71
+
+# tests
+pytest==9.1.1
+httpx==0.28.1

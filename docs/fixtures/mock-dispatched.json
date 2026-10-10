@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "data_source": "mock",
+  "boot_id": "mock-boot",
+  "revision": 1,
+  "sampled_at": "2026-10-10T03:03:13.979Z",
+  "journey": {
+    "id": "mock-dispatched",
+    "status": "paused",
+    "armed": true,
+    "pause_reason": "help_request",
+    "route_id": "campus_demo_v1",
+    "route_progress": 0.42,
+    "waypoint": "Library crossing",
+    "waypoint_index": 1,
+    "location": {
+      "source": "simulated",
+      "latitude": 33.75133,
+      "longitude": -84.38447,
+      "accuracy_m": null,
+      "landmark": "Fountain plaza",
+      "observed_at": "2026-10-10T03:03:13.979Z"
+    },
+    "created_at": "2026-10-10T03:02:13.979Z",
+    "version": 3
+  },
+  "active_incident": {
+    "id": "mock-incident-0001",
+    "status": "dispatched",
+    "request_source": "gesture",
+    "created_at": "2026-10-10T03:02:48.979Z",
+    "dispatch_at": "2026-10-10T03:02:58.979Z",
+    "seconds_until_dispatch": null,
+    "acknowledged_at": null,
+    "updated_at": "2026-10-10T03:03:08.979Z",
+    "version": 2
+  },
+  "last_incident": {
+    "id": "mock-incident-0001",
+    "status": "dispatched",
+    "request_source": "gesture",
+    "created_at": "2026-10-10T03:02:48.979Z",
+    "dispatch_at": "2026-10-10T03:02:58.979Z",
+    "seconds_until_dispatch": null,
+    "acknowledged_at": null,
+    "updated_at": "2026-10-10T03:03:08.979Z",
+    "version": 2
+  },
+  "vision": {
+    "input_mode": "test",
+    "ready": false,
+    "obstruction_active": false,
+    "obstruction_source": null,
+    "last_observed_at": null,
+    "error": "mock snapshot: no vision provider"
+  }
+}
