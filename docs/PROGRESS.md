@@ -99,3 +99,15 @@ start http://127.0.0.1:8000/user ; start http://127.0.0.1:8000/responder
 - **Detection thresholds unchanged.**
 - pytest **57 passed**. Frontend build passes. e2e_check **PASS** after the change.
 - Hands-on checklist: [HANDS_ON_TEST_CHECKLIST.md](HANDS_ON_TEST_CHECKLIST.md); all items UNVERIFIED.
+
+## 2026-10-10: Two small demo improvements
+
+- **Journey UUID with a Copy button on `/sim` and `/dev`.** The button falls back to select-and-copy on plain-HTTP LAN pages. `/dev` warns that **Reset demo creates a new UUID**, and Unreal Option A must then update its JourneyId. Adds the frontend helper `api.currentJourney`, which uses the existing `GET /api/journeys/current`. No API change.
+- **Spoken obstruction warnings are suppressed until the journey has started.**
+  - Detection status is still published: `vision.obstacle` with `announce: false`, and `obstruction_active` in the status and the snapshot.
+  - A chair still present when the journey starts is announced once and pauses the journey.
+  - A suppressed warning doesn't use up the 10 s cooldown.
+  - A chair reappearing during the cooldown still pauses an active journey silently (unchanged).
+  - Thresholds and the help lifecycle are unchanged.
+- pytest **60 passed** (3 new: silent then announced-after-start, cooldown not consumed, API/WebSocket `announce:false` while idle). Frontend build and `tsc` pass. e2e_check **PASS** on a real server. A real-server WebSocket check showed `announce: False` with the journey idle while `obstruction_active` stayed true. `/sim` and `/dev` are served (200).
+- **Pending (manual):** the Copy button in a real browser (localhost and LAN), and a live chair before and after Start (checklist 4a, 23a).

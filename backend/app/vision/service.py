@@ -306,8 +306,9 @@ class VisionService:
             return
         ctx = self.hooks.context()
         present = any(c[2] >= self.s.region_overlap for c in chairs)
-        upd = self.obstruction.update(t, present)
-        if upd.became_active or upd.cleared:
+        # Spoken warnings only once the journey has started (armed = active or paused).
+        upd = self.obstruction.update(t, present, can_warn=ctx.armed)
+        if upd.became_active or upd.cleared or upd.warn:
             if upd.became_active:
                 self.obstruction_source = self.mode
             self.hooks.on_obstruction(ctx.journey_id, upd.active, upd.warn, self.mode)
@@ -368,8 +369,9 @@ class VisionService:
         ctx = self.hooks.context()
         if kind == "obstruction":
             self.obstruction.active = True
+            self.obstruction.announced = ctx.armed
             self.obstruction_source = "test"
-            self.hooks.on_obstruction(ctx.journey_id, True, True, "test")
+            self.hooks.on_obstruction(ctx.journey_id, True, ctx.armed, "test")
         elif kind == "clear":
             self.obstruction.active = False
             self.hooks.on_obstruction(ctx.journey_id, False, False, "test")

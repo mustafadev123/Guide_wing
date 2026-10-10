@@ -1,13 +1,15 @@
 // Developer controls. Everything here is labeled TEST and is never presented as live detection.
 
 import { useState } from "react";
-import { api, ApiError, VisionStatus } from "../api";
+import { api, ApiError, Journey, VisionStatus } from "../api";
 import { usePolling } from "../events";
+import { CopyableId } from "../components";
 
 const MOCKS = ["active", "paused", "obstacle", "pending", "dispatched", "acknowledged", "cancelled", "resolved", "no-location"];
 
 export function DevPage() {
   const vision = usePolling<VisionStatus>(api.vision, 1000);
+  const journey = usePolling<Journey>(api.currentJourney, 2000);
   const [log, setLog] = useState<string>("");
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
@@ -31,8 +33,28 @@ export function DevPage() {
 
       <section className="card" aria-labelledby="demo-h">
         <h2 id="demo-h">Demo</h2>
+        <CopyableId
+          label="Current journey UUID (for Unreal JourneyId)"
+          value={journey.data?.id ?? null}
+          hint={journey.data ? `Status: ${journey.data.status}.` : undefined}
+        />
+        <p className="warn-box" id="reset-warning">
+          <strong>Warning:</strong> Reset demo ends this journey and creates a <strong>new UUID</strong>. If Unreal uses a
+          pasted UUID (Option A), update its JourneyId after resetting, or it will keep showing the old, ended journey.
+          Unreal set to <code>current</code> (Option B patch) follows automatically.
+        </p>
         <div className="controls">
-          <button className="btn" onClick={() => run("reset", api.devReset)}>Reset demo (new idle journey)</button>
+          <button
+            className="btn"
+            aria-describedby="reset-warning"
+            onClick={() => run("reset", async () => {
+              const j = await api.devReset();
+              await journey.refresh();
+              return { new_journey_id: j.id, status: j.status };
+            })}
+          >
+            Reset demo (new idle journey)
+          </button>
         </div>
       </section>
 

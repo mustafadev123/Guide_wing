@@ -133,6 +133,7 @@ export const api = {
   snapshot: (journeyId = "current") =>
     call<SimulationState>("GET", `/api/simulation/state?journey_id=${encodeURIComponent(journeyId)}`),
   route: () => call<RouteInfo>("GET", "/api/simulation/route"),
+  currentJourney: () => call<Journey>("GET", "/api/journeys/current"),
   journeyAction: (id: string, action: "start" | "pause" | "resume" | "end") =>
     call<Journey>("POST", `/api/journeys/${id}/${action}`),
   requestHelp: (journeyId: string, requestKey: string) =>

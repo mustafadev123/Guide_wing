@@ -50,7 +50,7 @@ pending --(10 s deadline, backend)--> dispatched --(responder accept)--> acknowl
 
 - `journey.updated` `{journey}`
 - `incident.updated` `{incident, transition, previous_status}`. `transition` is one of `created`, `dispatched`, `acknowledged`, `cancelled`, `resolved` or `snapshot_attached`.
-- `vision.obstacle` `{observation_id, state: detected|cleared, announce, source, journey_paused}`
+- `vision.obstacle` `{observation_id, state: detected|cleared, announce, source, journey_paused}`. `announce` is true only when the journey has started (active or paused). An obstruction seen before Start is published with `announce: false`, stays visible in vision status and the snapshot, and is announced once if it is still present after Start. A suppressed warning doesn't use up the cooldown.
 - `vision.status` `{vision}`
 
 Sequences are monotonic within a boot. On reconnect, on a new `boot_id` or on a sequence gap, clients must re-read REST state. Speech is deduplicated by `incident id + status` and by obstacle `observation_id`, never by connection. A refreshed page seeds its dedupe set from current state, so acknowledgment is not replayed; the user can press **Repeat** to hear it again on purpose.

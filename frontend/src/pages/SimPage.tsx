@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, describeLocation, RouteInfo, SimulationState } from "../api";
 import { usePolling } from "../events";
-import { ModeBadge } from "../components";
+import { CopyableId, ModeBadge } from "../components";
 
 const W = 640;
 const H = 360;
@@ -140,6 +140,11 @@ export function SimPage() {
         </dl>
       )}
       <p className="hint">Legend: U = participant, D = companion drone. Text above is the authoritative state.</p>
+      <CopyableId
+        label="Current journey UUID (for Unreal JourneyId)"
+        value={s && s.data_source === "live" ? s.journey.id : null}
+        hint="This view follows journey_id=current. Reset demo on /dev creates a new UUID."
+      />
     </main>
   );
 }

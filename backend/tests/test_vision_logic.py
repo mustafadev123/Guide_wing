@@ -154,3 +154,33 @@ def test_snapshot_is_blurred_before_write():
     blurred = cv2.Laplacian(cv2.cvtColor(out, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
     assert out.shape == frame.shape
     assert blurred < sharp * 0.01
+
+
+def test_obstruction_before_journey_start_is_silent_then_announced_once():
+    m = ObstructionMonitor(persist_s=1.0, cooldown_s=10.0)
+    t, warns = 0.0, 0
+    for _ in range(int(3.0 * FPS)):  # chair present, journey not started
+        t += DT
+        u = m.update(t, True, can_warn=False)
+        warns += u.warn
+    assert warns == 0 and m.active  # visual status still active
+    for _ in range(int(3.0 * FPS)):  # journey starts, chair still there
+        t += DT
+        warns += m.update(t, True, can_warn=True).warn
+    assert warns == 1
+
+
+def test_suppressed_warning_does_not_consume_cooldown():
+    m = ObstructionMonitor(persist_s=1.0, clear_s=1.5, cooldown_s=10.0)
+    t, warns = 0.0, 0
+
+    def step(seconds, present, can_warn):
+        nonlocal t, warns
+        for _ in range(int(round(seconds * FPS))):
+            t += DT
+            warns += m.update(t, present, can_warn).warn
+
+    step(2.0, True, False)   # seen while idle: silent
+    step(2.0, False, False)  # removed
+    step(2.0, True, True)    # journey started; chair back within 10 s of the silent one
+    assert warns == 1

@@ -11,6 +11,7 @@ Every item is **UNVERIFIED** until a person sees it work. Change `UNVERIFIED` to
 
 ## 1. Live camera
 4. `/user` shows the badge **LIVE camera** and the text "Recognition running". **UNVERIFIED**
+4a. **Before** pressing Start, put the chair in the region: the camera text says an obstruction is in the region, but nothing is **spoken**. Press Start with the chair still there: you hear one warning and the journey pauses. **UNVERIFIED**
 5. Start the journey. Move a chair into the yellow region and hold it there for at least 1 s: you get **one** warning, the journey pauses, and the box turns red. **UNVERIFIED**
 6. Leave the chair in place for 15 s: there are no repeated warnings. **UNVERIFIED**
 7. Remove the chair and press P: the journey resumes. **UNVERIFIED**
@@ -38,6 +39,7 @@ Every item is **UNVERIFIED** until a person sees it work. Change `UNVERIFIED` to
 23. Mark resolved: it moves to History. A request cancelled after dispatch shows the notice "cancelled by the user". **UNVERIFIED**
 
 ## 5. Unreal (with the teammate)
+23a. `/sim` and `/dev` show the current journey UUID, and **Copy** puts it on the clipboard. Over a LAN `http://` address, the fallback selects the ID for Ctrl+C. `/dev` shows the Reset warning, and after a reset a new UUID appears. **UNVERIFIED**
 24. Choose how to handle the journey ID (see [UNREAL_INTEGRATION.md §9](UNREAL_INTEGRATION.md)): Option A (paste the UUID) or Option B (patch, `JourneyId = current`). Choice: ____ **UNVERIFIED**
 25. Set `JourneyId = mock-obstacle`, then `mock-pending`, then `mock-cancelled`: the widget and chair react, and nothing shows "Journey ID mismatch". **UNVERIFIED**
 26. On the live journey: Start on `/user` moves the Unreal walker; Pause stops it; a Help request shows pending, then dispatched, then accepted. **UNVERIFIED**

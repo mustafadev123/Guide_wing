@@ -104,8 +104,16 @@ class Services:
             log.info("palm hold did not create a request: %s", e)
 
     def _on_obstruction(self, journey_id: str | None, active: bool, warn: bool, source: str) -> None:
+        # Detection status is always published; speech (announce) only for a started journey.
+        armed = False
+        if journey_id:
+            try:
+                armed = self.journeys.get(journey_id).armed
+            except NotFound:
+                pass
+        warn = warn and armed
         paused = False
-        if active and journey_id:
+        if active and journey_id:  # pauses only an active journey; idle/ended are untouched
             paused = self.journeys.pause_if_active(journey_id, "obstruction")
         self.bus.publish(
             "vision.obstacle",

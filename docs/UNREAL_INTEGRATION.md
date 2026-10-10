@@ -190,7 +190,7 @@ I checked it against the real backend on 10 Oct. The starter's README says it ha
 | Chair visibility = `ObstructionActive` | Also true for TEST injections | A TEST chair would look like a detection | Read `vision.obstruction_source` from `RawJson` and label `test` |
 | Mock `/api/health` returns `{"ok": true}` | Returns `{"status": "ok", …}` | The component doesn't call health | none |
 
-**Option A: no code change.** Set `JourneyId` to the current journey's UUID:
+**Option A: no code change.** Set `JourneyId` to the current journey's UUID. Copy it from `/sim` or `/dev` (each has a Copy button), or run:
 ```powershell
 (Invoke-RestMethod http://127.0.0.1:8000/api/journeys/current).id
 ```

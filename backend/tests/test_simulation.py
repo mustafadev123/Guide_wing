@@ -168,3 +168,25 @@ def test_briefing_uses_recorded_facts(h):
     iid = h.request_help(jid).json()["incident"]["id"]
     text = h.client.get(f"/api/incidents/{iid}/briefing").json()["text"]
     assert "Simulated location" in text and "Help button" in text
+
+
+def test_obstruction_not_announced_before_journey_starts(h):
+    with h.client.websocket_connect("/ws/events") as ws:
+        ws.receive_json()  # hello
+        h.client.post("/api/dev/vision/obstruction")  # journey idle
+        idle_event = next(e for e in iter(ws.receive_json, None) if e["type"] == "vision.obstacle")
+        assert idle_event["payload"]["state"] == "detected"
+        assert idle_event["payload"]["announce"] is False
+        # visual status stays available
+        assert h.client.get("/api/vision/status").json()["obstruction_active"] is True
+        assert h.snapshot()["vision"]["obstruction_active"] is True
+        assert h.snapshot()["journey"]["status"] == "idle"
+
+        h.client.post("/api/dev/vision/clear")
+        h.start()
+        h.client.post("/api/dev/vision/obstruction")
+        events = []
+        while not any(e["type"] == "vision.obstacle" and e["payload"]["state"] == "detected" for e in events):
+            events.append(ws.receive_json())
+        started = [e for e in events if e["type"] == "vision.obstacle" and e["payload"]["state"] == "detected"][-1]
+        assert started["payload"]["announce"] is True and started["payload"]["journey_paused"] is True

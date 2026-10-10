@@ -84,6 +84,10 @@ class ObstructionMonitor:
     - The obstruction clears after clear_s without a qualifying detection.
     - Warnings are rate-limited by cooldown_s: a chair that flickers away and
       back within the cooldown becomes active again silently.
+    - Warnings are only spoken while can_warn is true (journey started). An
+      obstruction seen before that stays visible as status, is not announced and
+      does not consume the cooldown; if it is still present once the journey
+      starts, it is announced then (once).
     """
 
     def __init__(self, persist_s=1.0, clear_s=1.5, cooldown_s=10.0, gap_tolerance_s=0.4):
@@ -94,9 +98,10 @@ class ObstructionMonitor:
         self.seen_start: float | None = None
         self.last_seen: float | None = None
         self.active = False
+        self.announced = False  # this activation episode has been announced (or deliberately silenced)
         self.last_warning: float | None = None
 
-    def update(self, t: float, present: bool) -> ObstructionUpdate:
+    def update(self, t: float, present: bool, can_warn: bool = True) -> ObstructionUpdate:
         became_active = cleared = warn = False
         if present:
             if self.seen_start is None or (self.last_seen is not None and t - self.last_seen > self.gap_tolerance_s):
@@ -104,14 +109,17 @@ class ObstructionMonitor:
             self.last_seen = t
             if not self.active and t - self.seen_start >= self.persist_s:
                 self.active = True
+                self.announced = False
                 became_active = True
-                if self.last_warning is None or t - self.last_warning >= self.cooldown_s:
-                    warn = True
-                    self.last_warning = t
         else:
             if self.last_seen is not None and t - self.last_seen > self.gap_tolerance_s:
                 self.seen_start = None
             if self.active and (self.last_seen is None or t - self.last_seen >= self.clear_s):
                 self.active = False
                 cleared = True
+        if self.active and not self.announced and can_warn:
+            self.announced = True
+            if self.last_warning is None or t - self.last_warning >= self.cooldown_s:
+                warn = True
+                self.last_warning = t
         return ObstructionUpdate(warn, became_active, cleared, self.active)
