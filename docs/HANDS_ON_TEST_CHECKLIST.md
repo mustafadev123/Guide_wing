@@ -6,37 +6,37 @@ Every item is **UNVERIFIED** until a person sees it work. Change `UNVERIFIED` to
 
 ## 0. Prepare
 1. Close other apps that use the camera. Confirm port 8000 is free: `Get-NetTCPConnection -LocalPort 8000 -State Listen` prints nothing.
-2. Run `.\.venv\Scripts\python.exe scripts\test_camera.py 0`. The webcam shows; note the fps; press Q. **UNVERIFIED**
-3. Run `powershell -ExecutionPolicy Bypass -File scripts\start.ps1`, then open `/user`, `/responder` and `/dev` (Show camera preview on `/user`). **UNVERIFIED**
+2. Run `.\.venv\Scripts\python.exe scripts\test_camera.py 0`. The webcam shows; note the fps; press Q. **PASS 10 Oct (user-observed, DroidCam index 1)**
+3. Run `powershell -ExecutionPolicy Bypass -File scripts\start.ps1`, then open `/user`, `/responder` and `/dev` (Show camera preview on `/user`). **PASS 10 Oct (user-observed, DroidCam index 1)**
 
 ## 1. Live camera
-4. `/user` shows the badge **LIVE camera** and the text "Recognition running". **UNVERIFIED**
+4. `/user` shows the badge **LIVE camera** and the text "Recognition running". **PASS 10 Oct (user-observed, DroidCam index 1)**
 4a. **Before** pressing Start, put the chair in the region: the camera text says an obstruction is in the region, but nothing is **spoken**. Press Start with the chair still there: you hear one warning and the journey pauses. **UNVERIFIED**
-5. Start the journey. Move a chair into the yellow region and hold it there for at least 1 s: you get **one** warning, the journey pauses, and the box turns red. **UNVERIFIED**
-6. Leave the chair in place for 15 s: there are no repeated warnings. **UNVERIFIED**
-7. Remove the chair and press P: the journey resumes. **UNVERIFIED**
-8. Wave or show your palm for less than 1 s, several times: **no** request. **UNVERIFIED**
-9. Hold an open palm for 2 s: **one** request. Keep holding for 5 s more: still one. Write down the palm score shown on the preview: ____ **UNVERIFIED**
-10. Press C while the palm is still raised: cancelled, with no new request until you lower your hand for at least 1 s and raise it again. **UNVERIFIED**
+5. Start the journey. Move a chair into the yellow region and hold it there for at least 1 s: you get **one** warning, the journey pauses, and the box turns red. **PASS 10 Oct (user-observed, DroidCam index 1)**
+6. Leave the chair in place for 15 s: there are no repeated warnings. **PASS 10 Oct (user-observed, DroidCam index 1)**
+7. Remove the chair and press P: the journey resumes. **PASS 10 Oct (user-observed, DroidCam index 1)**
+8. Wave or show your palm for less than 1 s, several times: **no** request. **PASS 10 Oct (user-observed, DroidCam index 1)**
+9. Hold an open palm for 2 s: **one** request. Keep holding for 5 s more: still one. Write down the palm score shown on the preview: ____ **PASS 10 Oct (user-observed, DroidCam index 1)**
+10. Press C while the palm is still raised: cancelled, with no new request until you lower your hand for at least 1 s and raise it again. **PASS 10 Oct (user-observed, DroidCam index 1)**
 11. Walk into view yourself: you show as a person overlay and never as an obstruction. **UNVERIFIED**
-12. Cover or unplug the camera: the badge shows "not ready" or an error, and the **Help button still works**. **UNVERIFIED**
+12. Cover or unplug the camera: the badge shows "not ready" or an error, and the **Help button still works**. **PASS 10 Oct (user-observed, DroidCam index 1)**
 
 ## 2. Speech (on `/user`, volume up)
-13. Click Start: you hear "Journey started…" (no audio before the first click is expected). **UNVERIFIED**
-14. You hear each of these **once**: obstruction, request starting, cancelled, sent to responder, responder accepted. The countdown seconds are **not** spoken. **UNVERIFIED**
-15. Refresh `/user` while a request is accepted: the acknowledgment is **not** replayed. Pressing R repeats it. **UNVERIFIED**
+13. Click Start: you hear "Journey started…" (no audio before the first click is expected). **PASS 10 Oct (user-observed, DroidCam index 1)**
+14. You hear each of these **once**: obstruction, request starting, cancelled, sent to responder, responder accepted. The countdown seconds are **not** spoken. **PASS 10 Oct (user-observed, DroidCam index 1)**
+15. Refresh `/user` while a request is accepted: the acknowledgment is **not** replayed. Pressing R repeats it. **PASS 10 Oct (user-observed, DroidCam index 1)**
 
 ## 3. Keyboard (no mouse)
 16. Tab reaches every control in a sensible order, and the yellow focus ring is always visible. **UNVERIFIED**
-17. H (help), C or Esc (cancel), R (repeat) and P (pause/resume) all work. **UNVERIFIED**
+17. H (help), C or Esc (cancel), R (repeat) and P (pause/resume) all work. **PASS 10 Oct (user-observed, DroidCam index 1)**
 18. With NVDA or Narrator, status messages are read aloud and the countdown is not. **UNVERIFIED**
 19. Windows "Show animations" off (reduced motion): `/sim` stops extrapolating movement. **UNVERIFIED**
 
 ## 4. Responder
 20. A request is **not** acceptable while pending (it appears under "Incoming — user can still cancel"). **UNVERIFIED**
-21. After 10 s it moves to the Active queue with "Simulated location: near …", timestamps, the briefing and a blurred snapshot. **UNVERIFIED**
+21. After 10 s it moves to the Active queue with "Simulated location: near …", timestamps, the briefing and a blurred snapshot. **PASS 10 Oct (user-observed, DroidCam index 1)**
 22. Open `/responder` in two tabs and click Accept in both: one says "Already handled", and the user hears the acknowledgment once. **UNVERIFIED**
-23. Mark resolved: it moves to History. A request cancelled after dispatch shows the notice "cancelled by the user". **UNVERIFIED**
+23. Mark resolved: it moves to History. A request cancelled after dispatch shows the notice "cancelled by the user". **PASS 10 Oct (user-observed, DroidCam index 1)**
 
 ## 5. Unreal (with the teammate)
 23a. `/sim` and `/dev` show the current journey UUID, and **Copy** puts it on the clipboard. Over a LAN `http://` address, the fallback selects the ID for Ctrl+C. `/dev` shows the Reset warning, and after a reset a new UUID appears. **UNVERIFIED**

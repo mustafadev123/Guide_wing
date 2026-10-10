@@ -128,3 +128,29 @@ start http://127.0.0.1:8000/user ; start http://127.0.0.1:8000/responder
   - speaks the reason when the button or the H/C key is pressed.
 
   The lifecycle is unchanged. The frontend build passes.
+
+## 2026-10-10: Live camera journey test (user-observed): PASS
+
+- **Camera:** the laptop (ASUS ROG Zephyrus G14 GA401QM) has **no built-in webcam**. The phone is used through **DroidCam over USB** at index 1. DroidCam only delivers frames through Media Foundation, so the camera opener now tries MSMF before DirectShow (commit `fce8d33`). Measured: live, about 20 fps, about 45–55 ms inference.
+- **Full journey test, run by the user and reported "everything works":**
+  - start
+  - real chair warning and pause, with no repeats
+  - resume
+  - waves don't trigger
+  - a 2 s palm hold creates one request
+  - cancel while still holding, with no retrigger
+  - rearm, then a new request
+  - dispatch to the responder with simulated location and a blurred snapshot
+  - accept, with the acknowledgment spoken once, and R repeats without replay on refresh
+  - resolve
+  - covered lens: Help still works
+  - end of route, then Start a new journey
+- **Lighting matters:** in a dark room the chair was rarely detected. With the room lit, detection worked at the **default thresholds (unchanged)**.
+- **Still unverified:**
+  - chair before Start (4a)
+  - person overlay (11)
+  - full keyboard Tab order, screen reader and reduced motion (16, 18, 19)
+  - responder edge cases (20, 22, 23a)
+  - all Unreal items
+  - LAN or phone access
+  - the live palm and chair scores were not recorded
