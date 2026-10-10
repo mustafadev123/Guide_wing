@@ -151,14 +151,17 @@ class VisionService:
     def _open(self):
         import cv2
 
+        from .camera import open_camera
+
         src = self.s.source
         if src.isdigit():
-            cap = cv2.VideoCapture(int(src), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        else:
-            cap = cv2.VideoCapture(src)
-        return cap
+            cap, backend = open_camera(int(src))
+            if cap is None:
+                return cv2.VideoCapture()  # not opened -> caller reports and retries
+            with self._lock:
+                self.source_label = f"webcam index {src} ({backend})"
+            return cap
+        return cv2.VideoCapture(src)
 
     def _capture_loop(self) -> None:
         import cv2

@@ -8,30 +8,38 @@ r"""Open a webcam index or a video file and show frames until Q is pressed.
 Close any other app that uses the camera first (the backend owns the camera while running).
 """
 
-import os
 import sys
 import time
+from pathlib import Path
 
 import cv2
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.app.vision.camera import open_camera  # noqa: E402  (same opener the backend uses)
 
 
 def open_source(src: str):
     if src.isdigit():
-        return cv2.VideoCapture(int(src), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
-    return cv2.VideoCapture(src)
+        cap, backend = open_camera(int(src))
+        if cap is None:
+            return cv2.VideoCapture(), None
+        return cap, backend
+    return cv2.VideoCapture(src), "file"
 
 
 def main() -> int:
     arg = sys.argv[1] if len(sys.argv) > 1 else "0"
     if arg == "--list":
         for i in range(5):
-            cap = open_source(str(i))
+            cap, backend = open_source(str(i))
             ok = cap.isOpened() and cap.read()[0]
-            print(f"index {i}: {'frames OK' if ok else 'not available'}")
+            print(f"index {i}: {f'frames OK via {backend}' if ok else 'not available'}")
             cap.release()
         return 0
 
-    cap = open_source(arg)
+    cap, backend = open_source(arg)
+    if backend:
+        print(f"opened {arg!r} via {backend}")
     try:
         if not cap.isOpened():
             print(f"FAIL: cannot open {arg!r}. Is another app using the camera, or is camera permission off "
