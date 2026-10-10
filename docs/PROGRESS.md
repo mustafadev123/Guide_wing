@@ -111,3 +111,20 @@ start http://127.0.0.1:8000/user ; start http://127.0.0.1:8000/responder
   - Thresholds and the help lifecycle are unchanged.
 - pytest **60 passed** (3 new: silent then announced-after-start, cooldown not consumed, API/WebSocket `announce:false` while idle). Frontend build and `tsc` pass. e2e_check **PASS** on a real server. A real-server WebSocket check showed `announce: False` with the journey idle while `obstruction_active` stayed true. `/sim` and `/dev` are served (200).
 - **Pending (manual):** the Copy button in a real browser (localhost and LAN), and a live chair before and after Start (checklist 4a, 23a).
+
+## 2026-10-10: Hands-on test finding: "hang" after the route ended
+
+- **Your report:** the page seemed to hang when you pressed Pause.
+- **Cause, from the logs:** the server stayed healthy, with every request returning 200. The 90 s demo route had reached 100%, so the journey was `ended`. The Pause/Resume control disappears for ended journeys and **P** did nothing silently.
+- **Fixes:**
+  - The default route is now **180 s** of walking; pauses don't count. Tests keep 90 s explicitly.
+  - Pressing **P** on an ended journey speaks "This journey has ended. Press Start a new journey…"
+  - `/user` shows **"Start a new journey"**, which creates and starts a fresh journey using the existing `POST /api/journeys` and `/start`. The API contract is unchanged.
+- pytest 60 passed. The frontend builds. On the real server: route 180 s, and the new journey was active while the old one stayed `ended`.
+- **Pending (manual):** press the button and the P key in the browser.
+- **Second finding:** Help and Cancel went grey after the request was accepted, with no explanation. This is the designed lifecycle: an `acknowledged` request stays open until the responder clicks **Mark resolved**, and only pending or dispatched requests can be cancelled. The UI now:
+  - keeps both buttons focusable (`aria-disabled` instead of `disabled`),
+  - shows the reason under them, and
+  - speaks the reason when the button or the H/C key is pressed.
+
+  The lifecycle is unchanged. The frontend build passes.

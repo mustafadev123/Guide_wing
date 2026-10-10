@@ -134,6 +134,7 @@ export const api = {
     call<SimulationState>("GET", `/api/simulation/state?journey_id=${encodeURIComponent(journeyId)}`),
   route: () => call<RouteInfo>("GET", "/api/simulation/route"),
   currentJourney: () => call<Journey>("GET", "/api/journeys/current"),
+  createJourney: () => call<Journey>("POST", "/api/journeys"),
   journeyAction: (id: string, action: "start" | "pause" | "resume" | "end") =>
     call<Journey>("POST", `/api/journeys/${id}/${action}`),
   requestHelp: (journeyId: string, requestKey: string) =>

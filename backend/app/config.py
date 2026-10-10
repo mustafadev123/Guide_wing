@@ -55,7 +55,7 @@ class Settings:
     snapshot_dir: Path = REPO_ROOT / "backend" / "data" / "snapshots"
     frontend_dist: Path = REPO_ROOT / "frontend" / "dist"
     cancel_window_s: float = 10.0
-    route_duration_s: float = 90.0
+    route_duration_s: float = 180.0  # seconds of walking (pauses excluded)
     tick_s: float = 0.25
     dev_controls: bool = True
     cors_origins: list[str] = field(

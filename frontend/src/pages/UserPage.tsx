@@ -144,8 +144,37 @@ export function UserPage() {
   const active = state?.active_incident ?? null;
   const canHelp = !!journey && journey.armed && !active;
   const canCancel = !!active && (active.status === "pending" || active.status === "dispatched");
+  // Why Help/Cancel are unavailable right now (spoken when pressed; shown under the buttons).
+  const helpBlocked = canHelp
+    ? null
+    : !journey || journey.status === "idle"
+      ? "Start the journey first, then you can request help."
+      : journey.status === "ended"
+        ? "This journey has ended. Start a new journey to request help."
+        : active?.status === "acknowledged"
+          ? "A responder has already accepted your request. A new request becomes possible after the responder marks it resolved."
+          : "A help request is already active. Use Cancel if you no longer need help.";
+  const cancelBlocked = canCancel
+    ? null
+    : active?.status === "acknowledged"
+      ? "This request was already accepted by a responder, so it can no longer be cancelled here. The responder will mark it resolved."
+      : "There is no help request to cancel.";
+  const explain = (text: string | null) => {
+    enableAudio();
+    if (text) announcer.say(text);
+  };
 
   const start = () => journey && run(() => api.journeyAction(journey.id, "start"));
+  // A finished journey cannot be resumed; start a fresh one (backend ends the old one).
+  const startNew = () =>
+    run(async () => {
+      const fresh = await api.createJourney();
+      await api.journeyAction(fresh.id, "start");
+    });
+  const endedMessage = () => {
+    enableAudio();
+    announcer.say("This journey has ended. Press Start a new journey to begin again.");
+  };
   const togglePause = () =>
     journey && run(() => api.journeyAction(journey.id, journey.status === "paused" ? "resume" : "pause"));
   const help = () =>
@@ -167,18 +196,19 @@ export function UserPage() {
   };
 
   // Keyboard shortcuts (ignored inside text fields and with modifiers).
-  const shortcuts = useRef({ start, togglePause, help, cancel, repeat, canHelp, canCancel, journey });
-  shortcuts.current = { start, togglePause, help, cancel, repeat, canHelp, canCancel, journey };
+  const shortcuts = useRef({ start, togglePause, help, cancel, repeat, endedMessage, explain, helpBlocked, cancelBlocked, canHelp, canCancel, journey });
+  shortcuts.current = { start, togglePause, help, cancel, repeat, endedMessage, explain, helpBlocked, cancelBlocked, canHelp, canCancel, journey };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (e.ctrlKey || e.metaKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
       const s = shortcuts.current;
       const k = e.key.toLowerCase();
-      if (k === "h" && s.canHelp) s.help();
-      else if ((k === "c" || k === "escape") && s.canCancel) s.cancel();
+      if (k === "h") (s.canHelp ? s.help() : s.explain(s.helpBlocked));
+      else if (k === "c" || k === "escape") (s.canCancel ? s.cancel() : s.explain(s.cancelBlocked));
       else if (k === "r") s.repeat();
       else if (k === "p" && s.journey && (s.journey.status === "active" || s.journey.status === "paused")) s.togglePause();
+      else if (k === "p" && s.journey?.status === "ended") s.endedMessage();
       else return;
       e.preventDefault();
     };
@@ -241,17 +271,32 @@ export function UserPage() {
           </p>
         )}
         <div className="controls">
-          <button className="btn danger huge" onClick={help} disabled={busy || !canHelp} aria-keyshortcuts="H">
+          <button
+            className="btn danger huge"
+            onClick={() => (canHelp ? help() : explain(helpBlocked))}
+            disabled={busy}
+            aria-disabled={!canHelp}
+            aria-describedby={helpBlocked ? "help-blocked" : undefined}
+            aria-keyshortcuts="H"
+          >
             Help <kbd>H</kbd>
           </button>
-          <button className="btn huge" onClick={cancel} disabled={busy || !canCancel} aria-keyshortcuts="C Escape">
+          <button
+            className="btn huge"
+            onClick={() => (canCancel ? cancel() : explain(cancelBlocked))}
+            disabled={busy}
+            aria-disabled={!canCancel}
+            aria-describedby={active && cancelBlocked ? "cancel-blocked" : undefined}
+            aria-keyshortcuts="C Escape"
+          >
             Cancel request <kbd>C</kbd>
           </button>
           <button className="btn" onClick={repeat} aria-keyshortcuts="R">
             Repeat last message <kbd>R</kbd>
           </button>
         </div>
-        {journey && !journey.armed && <p className="hint">Start the journey to enable help requests.</p>}
+        {helpBlocked && <p className="hint" id="help-blocked">{helpBlocked}</p>}
+        {active && cancelBlocked && <p className="hint" id="cancel-blocked">{cancelBlocked}</p>}
       </section>
 
       <section aria-labelledby="journey-h" className="card">
@@ -279,7 +324,16 @@ export function UserPage() {
               {journey.status === "paused" ? "Resume journey" : "Pause journey"} <kbd>P</kbd>
             </button>
           )}
-          {journey?.status === "ended" && <p className="hint">Journey ended. Use the developer page to reset the demo.</p>}
+          {journey?.status === "ended" && (
+            <>
+              <p className="big">
+                {journey.route_progress >= 1 ? "You reached the end of the demo route." : "This journey has ended."}
+              </p>
+              <button className="btn primary huge" onClick={startNew} disabled={busy}>
+                Start a new journey
+              </button>
+            </>
+          )}
         </div>
       </section>
 

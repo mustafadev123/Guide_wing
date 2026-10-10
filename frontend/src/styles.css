@@ -71,7 +71,7 @@ a { color: var(--text); text-decoration: underline; }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.secondary { border-style: dashed; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 kbd { border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; font-size: 0.8em; margin-left: 6px; }
 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }

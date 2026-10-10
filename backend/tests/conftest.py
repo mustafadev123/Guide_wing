@@ -17,6 +17,7 @@ def settings(tmp_path):
     s.db_path = tmp_path / "test.sqlite3"
     s.snapshot_dir = tmp_path / "snapshots"
     s.frontend_dist = tmp_path / "no-dist"
+    s.route_duration_s = 90.0  # tests assume a 90 s route
     s.vision.source = ""  # unavailable unless a test wires a provider
     return s
 
