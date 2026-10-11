@@ -56,7 +56,7 @@ The SHA-256 job identity includes prompt version (now 2), model, selection, metr
 - Model unavailable: set `GEMINI_ANALYTICS_MODEL` to an accessible structured-output model and restart.
 - HTTP 400: Gemini rejected the request format/configuration. This is not a temporary outage. The initial implementation used the wrong MIME enum; the corrected request is covered by a regression assertion and a successful live call.
 - Quota/rate limit: recorded figures remain available; check Google AI Studio quota and retry later. The server's short cooldown does not guarantee Google quota has recovered.
-- Timeout/network/provider or output-validation failure: error text is visible; ordinary request/journey/analytics behavior continues. The provider HTTP timeout is 15 seconds.
+- Timeout/network/provider or output-validation failure: error text is visible; ordinary request/journey/analytics behavior continues. The provider HTTP timeout is 40 seconds (raised from 15 s on 2026-10-11: a live gemini-3.8-flash report took longer than 15 s), below the 45-second browser status polling.
 - Status polling stops after 45 seconds or a connection failure. **Check summary** reads the same job without a new external request. A missing job after restart returns to **Generate summary**, requiring explicit activation.
 
 Verified with synthetic data and stubbed Gemini HTTP: **78 backend tests**, **five Node tests**, strict TypeScript/production build, and **27 browser checks** against a separate test database. Checks covered payload privacy, filtering/timing definitions, caching/deduplication/cooldown, HTTP errors, malformed/rejected responses, browser generation/recovery, keyboard access, responsive layouts, and continued help/cancellation.

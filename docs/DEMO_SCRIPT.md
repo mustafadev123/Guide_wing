@@ -1,6 +1,6 @@
 # GuideWing presentation script: recorded Unreal + working web frontend
 
-Use this runbook for live judging when Unreal is not connected to the backend. Use [BACKUP_VIDEO_SCRIPT.md](BACKUP_VIDEO_SCRIPT.md) for the two-minute submission video, and [../backup.md](../backup.md) for detailed actions, contingencies, and judge questions.
+Use this runbook for live judging when Unreal is not connected to the backend. Use [BACKUP_VIDEO_SCRIPT.md](BACKUP_VIDEO_SCRIPT.md) for the two-minute submission video, and [BACKUP_PLAN.md](BACKUP_PLAN.md) for detailed actions, contingencies, and judge questions.
 
 ## Presentation setup and feature status
 

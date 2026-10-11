@@ -147,6 +147,9 @@ export function ResponderPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<"active" | "history" | "analytics">("active");
   const seen = useRef<Map<string, string> | null>(null);
+  // Status reached through this desk's own action: keep the server's reply ("Server confirmed" /
+  // "Already handled") instead of overwriting it with the generic change notice.
+  const ownChange = useRef<{ id: string; status: string } | null>(null);
   const onEvent = useCallback((e: ServerEvent) => { if (e.type.startsWith("incident.")) void list.refresh(); }, [list.refresh]);
   const connection = useServerEvents(onEvent, () => { void list.refresh(); });
   useEffect(() => {
@@ -155,6 +158,7 @@ export function ResponderPage() {
     if (seen.current) for (const i of list.data) {
       const previous = seen.current.get(i.id);
       if (previous === i.status) continue;
+      if (ownChange.current?.id === i.id && ownChange.current.status === i.status) { ownChange.current = null; continue; }
       if (i.status === "dispatched") setNotice(`New dispatched request near ${i.location.landmark ?? "unknown landmark"}.`);
       else if (i.status === "cancelled") setNotice("A request was canceled by the user.");
       else if (i.status === "acknowledged") setNotice("A responder accepted a request.");
@@ -166,7 +170,8 @@ export function ResponderPage() {
     if (lock.current || list.error || stale) return;
     lock.current = true; setBusy(true); setActionError(null);
     try {
-      const result = await fn() as { changed?: boolean };
+      const result = await fn() as { changed?: boolean; incident?: { id: string; status: string } };
+      if (result.incident) ownChange.current = { id: result.incident.id, status: result.incident.status };
       setNotice(result.changed === false ? "Already handled. Current server state is shown." : "Server confirmed the action.");
     } catch (e) { setActionError(e instanceof ApiError ? e.message : "Server confirmation unavailable. Refresh the queue before trying again."); }
     finally { await list.refresh(); lock.current = false; setBusy(false); }

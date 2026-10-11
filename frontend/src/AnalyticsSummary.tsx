@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, AnalyticsConfiguration, AnalyticsReport } from "./api";
 import { AnalyticsMetrics, AnalyticsRange, summaryMatches } from "./analyticsMetrics";
 
-const RANGE_NAMES = { day: "Last 24 hours", week: "Last 7 days", loaded: "All loaded records" };
 
 export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
   range: AnalyticsRange; includeTests: boolean; metrics: AnalyticsMetrics; stale: boolean;
@@ -100,24 +99,20 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
   const blocked = busy || stale || !configuration?.configured || (!pending && metrics.total === 0) || (pending && !checkAgain);
   return <section className="ai-summary" aria-labelledby="ai-title">
     <div className="ai-summary-content">
-      <p className="eyebrow">Optional interpretation</p>
-      <h3 id="ai-title">Gemini analytics summary</h3>
+      <h3 id="ai-title">Summary</h3>
       <div aria-live="polite" aria-atomic="true">
         {!configuration && !error && <p>Checking Gemini setup...</p>}
         {configuration && !configuration.configured && <p>Gemini is not configured. Add the server API key to Guide_wing/.env and restart the backend, then check setup.</p>}
-        {configuration?.configured && !report && <p>Review queue outcomes, response times, and a focused check for your next rehearsal. Only aggregate counts and timings are sent to Gemini.</p>}
+        {configuration?.configured && !report && <p>Summarize queue outcomes and response times.</p>}
         {pending && <p>Generating from the recorded snapshot. Journey and help controls remain available.</p>}
         {report?.status === "ready" && (report.sections ? <div className="analytics-report">
           <div><h4>Queue outcomes</h4><p className="ai-generated">{report.sections.overview}</p></div>
           <div><h4>Response times</h4><p className="ai-generated">{report.sections.response_times}</p></div>
-          <div><h4>Next rehearsal check</h4><p className="ai-generated">{report.sections.next_check}</p></div>
         </div> : <p className="ai-generated">{report.text}</p>)}
         {report && !["ready", "pending"].includes(report.status) && <p>{report.reason} {report.retry_after_s > 0 ? `Retry after about ${report.retry_after_s} seconds.` : ""}</p>}
         {error && <p className="warn">{error}</p>}
       </div>
-      {report && <p className="hint">{report.status === "ready" ? "AI generated interpretation" : "Requested snapshot"} · {RANGE_NAMES[report.range]} · {report.include_tests ? "TEST records included" : "TEST records excluded"} · {report.metrics.total} requests · {report.as_of} UTC. {report.scope}.{report.cached ? " Cached result reused." : ""}</p>}
       {report?.status === "ready" && changed && <p className="warn">The recorded figures have changed since this summary was requested. Generate an updated summary.</p>}
-      <p className="hint">Read alongside the recorded figures. This is simulated dispatch. AI text is not a safety assessment or instruction.</p>
     </div>
     <div className="ai-summary-actions">
       <button className="btn" onClick={generate} disabled={!!blocked}>{busy ? "Requesting..." : pending && !checkAgain ? "Generating..." : pending ? "Check summary" : report?.status === "ready" ? changed ? "Update summary" : "Generate summary" : report?.status === "failed" || report?.status === "rejected" ? "Retry summary" : "Generate summary"}</button>

@@ -73,7 +73,7 @@ def test_provider_receives_only_aggregates_and_cache_is_stable(clock):
     def post(url, headers, body, timeout):
         calls.append(json.loads(body))
         assert headers["x-goog-api-key"] == "fake"
-        assert timeout == 15
+        assert timeout == 40
         assert json.loads(body)["generationConfig"]["responseFormat"]["text"]["mimeType"] == "APPLICATION_JSON"
         return reply()
     provider = GeminiAnalytics("fake", "model", post=post)

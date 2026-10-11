@@ -1,6 +1,6 @@
 # GuideWing backup video: "An answer you can hear"
 
-Target: approximately two minutes, following the existing submission checklist's video target. Confirm the actual event limit before export. The live judging plan and feature evidence are in [../backup.md](../backup.md).
+Target: approximately two minutes, following the existing submission checklist's video target. Confirm the actual event limit before export. The live judging plan and feature evidence are in [BACKUP_PLAN.md](BACKUP_PLAN.md).
 
 Use the team's finished frontend for footage once it runs against the real backend. Until then, use the existing `/user`, `/responder`, and `/sim` pages. Gemini completed-response reports and analytics are planned additions, distinct from the currently implemented responder briefing. Include their footage only after implementation and rehearsal; a design mockup must be labeled as planned.
 
@@ -100,7 +100,7 @@ Do not add scripted ElevenLabs clips to offline Unreal footage that appear to re
 ## References
 
 - [README](../README.md)
-- [Live judging and backup plan](../backup.md)
+- [Live judging and backup plan](BACKUP_PLAN.md)
 - [Latest hands-on test checklist](HANDS_ON_TEST_CHECKLIST.md)
 - [Limitations](LIMITATIONS.md)
 - [Submission checklist](SUBMISSION_CHECKLIST.md)

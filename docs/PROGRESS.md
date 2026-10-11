@@ -154,3 +154,71 @@ start http://127.0.0.1:8000/user ; start http://127.0.0.1:8000/responder
   - all Unreal items
   - LAN or phone access
   - the live palm and chair scores were not recorded
+
+## 2026-10-11: Web demo verification (website, DroidCam, responder, Gemini)
+
+Scope: website, backend, live DroidCam vision, responder workflow and Gemini analytics. Automated workflow and browser checks used **separate test servers with temporary databases**. The real `backend/data/guidewing.sqlite3` was never reset or deleted.
+
+**Automated (current build):**
+- pytest **89 passed**
+- Node tests **5/5**
+- strict TypeScript + production build pass
+- `scripts/e2e_check.py` **16/16** (real 10 s clock)
+
+**Real browser:** new `scripts/web_browser_check.cjs` drives installed Microsoft Edge (headless, `playwright-core` in git-ignored `tools/browsertest`). **45/45** checks:
+- start, with `/sim` movement and a "simulated" label
+- pause/resume consistent across pages, progress frozen while paused
+- backend-owned 10 s deadline and server countdown
+- cancel before dispatch, still cancelled after the deadline
+- double-click Help creates one request
+- pending not acceptable
+- two responders give one acknowledgment, with "Server confirmed" and "Already handled"
+- acknowledgment spoken once, not replayed after refresh; Repeat works
+- resolve re-enables Help
+- visible keyboard focus and named buttons
+- ended journey offers Start a new journey
+- unavailable location shown without coordinates
+- connection loss shown, then recovery
+- analytics matches the API
+- no stray placeholder characters, no console errors
+
+Speech was observed by intercepting `speechSynthesis.speak`. That proves the page asked to speak, not that audio was audible.
+
+**Fixes:**
+- **Responder notice:** the second responder's "Already handled" was overwritten by the generic change notice (`ResponderPage.tsx`).
+- **Gemini timeout:** raised from 15 s to 40 s. A live `gemini-3.8-flash` report took about 16 s and timed out (`analytics.py`, test, `docs/GEMINI_ANALYTICS.md`).
+- **Favicon:** inline icon added; it was the only console 404.
+
+**Display changes (requested):** the analytics panel title is now "Summary". The "Next rehearsal check" section and the caveat lines are no longer displayed; the backend prompt is unchanged.
+
+**Live DroidCam** (hands-on by the user; evidence from a server-side event log, no frames saved):
+- **Setup:** DroidCam is camera index 0 (640×480 via Media Foundation). Frames were black until the server was restarted after DroidCam started streaming, so the rule is: start DroidCam first, then the backend.
+- **Chair:** detected, with one spoken-warning flag, and the journey paused (`obstruction`). Cleared after about 9 s; resume was explicit.
+- **Palm:** a 2 s hold created exactly **one** gesture request (hold progress 0.2 → 0.9, then the request). Cancel while holding: no retrigger. Interrupted holds (0.5, 0.1) were ignored.
+- **Button Help** created and cancelled correctly.
+- **Snapshots:** a blurred snapshot was attached about 20 ms after each request.
+- **Processing:** about 19–20 fps and 48–57 ms per frame on CPU. This is processing speed, not accuracy or end-to-end latency.
+- **Observation:** a second warning fired 1 s after a clear (cooldown elapsed). Keep the chair clearly inside or clearly outside the region.
+- **Not recorded today:** a live request through to acknowledgment (observed on 10 Oct), and camera unplug while running.
+
+**REPLAY (labeled, default thresholds):** chair warning and pause 3/3. The palm photo scored below 0.6, so there was no palm request; thresholds were not lowered.
+
+**Gemini (real key in git-ignored `.env`; key never printed, logged or returned):**
+- First call: `TimeoutError` at 15 s, which led to the timeout fix.
+- Second call: HTTP 503 from Google (temporary), surfaced correctly.
+- Third call: **ready in 16.1 s**. Every figure matched the database: 6 requests, 1 resolved (16.7%), 5 cancelled (83.3%), 1 cancelled before / 4 after dispatch, 5 gesture / 1 button, 33.7 s to acceptance, 16.4 s to resolution. Labeled simulated.
+- A later in-browser Generate also succeeded after the data changed.
+- Missing-key fallback verified on a test server; no key or provider URL in the frontend bundle.
+
+**Repository:**
+- `backup.md` moved to `docs/BACKUP_PLAN.md`, with links fixed
+- `docs/JUDGE_QUESTIONS.md` removed
+- `LICENSE` added (AGPL-3.0, because of the Ultralytics/YOLO dependency; a team decision to confirm)
+- README rewritten for submission
+
+**Still open:**
+- screen-reader pass
+- ElevenLabs with a real key
+- demo video and screenshots
+- rotate the Gemini key after the event (it was shared in a chat)
+- the architecture index reports drift, partly from Windows line endings, and was not rebaselined

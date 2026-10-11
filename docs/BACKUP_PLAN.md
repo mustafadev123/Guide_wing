@@ -2,7 +2,7 @@
 
 This plan assumes Unreal cannot connect to the GuideWing backend. The preferred presentation uses a 10-15-second recorded Unreal concept clip on a phone, followed by the working frontend on one web laptop. If the clip is unavailable, omit it and use the existing `/sim` view.
 
-The core fallback uses existing functionality. The finished frontend and Gemini-generated response reports/analytics are planned additions and appear below with explicit readiness conditions; editing this plan does not implement those features. The companion video storyboard is in [docs/BACKUP_VIDEO_SCRIPT.md](docs/BACKUP_VIDEO_SCRIPT.md), and the quick presentation runbook is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+The core fallback uses existing functionality. The finished frontend and Gemini-generated response reports/analytics are planned additions and appear below with explicit readiness conditions; editing this plan does not implement those features. The companion video storyboard is in [docs/BACKUP_VIDEO_SCRIPT.md](BACKUP_VIDEO_SCRIPT.md), and the quick presentation runbook is in [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md).
 
 ## Finished frontend and Gemini reports: presentation readiness
 
@@ -280,10 +280,10 @@ If a restart is necessary, run `scripts\stop.ps1` before launching again. For re
 
 ## Project references
 
-- [README](README.md)
-- [Hands-on testing](docs/HANDS_ON_TEST_CHECKLIST.md)
-- [Progress and latest user-observed results](docs/PROGRESS.md)
-- [Limitations](docs/LIMITATIONS.md)
-- [API contract](docs/CONTRACT.md)
-- [Unreal integration](docs/UNREAL_INTEGRATION.md)
-- [Original demo script](docs/DEMO_SCRIPT.md) - this backup supersedes its assumptions about connected Unreal and its staged-threat framing for this demonstration
+- [README](../README.md)
+- [Hands-on testing](HANDS_ON_TEST_CHECKLIST.md)
+- [Progress and latest user-observed results](PROGRESS.md)
+- [Limitations](LIMITATIONS.md)
+- [API contract](CONTRACT.md)
+- [Unreal integration](UNREAL_INTEGRATION.md)
+- [Original demo script](DEMO_SCRIPT.md) - this backup supersedes its assumptions about connected Unreal and its staged-threat framing for this demonstration

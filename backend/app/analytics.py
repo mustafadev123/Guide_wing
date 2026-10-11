@@ -192,7 +192,7 @@ class GeminiAnalytics:
         }).encode()
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         try:
-            raw = self._post(url, {"x-goog-api-key": self._key, "Content-Type": "application/json"}, body, 15.0)
+            raw = self._post(url, {"x-goog-api-key": self._key, "Content-Type": "application/json"}, body, 40.0)  # structured output on gemini-3.8-flash measured >15 s; stays under the UI's 45 s polling
             response = json.loads(raw)
             parts = response["candidates"][0]["content"]["parts"]
             text = "".join(p.get("text", "") for p in parts if not p.get("thought"))

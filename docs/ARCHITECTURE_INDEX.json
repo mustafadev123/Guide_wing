@@ -129,7 +129,7 @@
     "status": {
       "files": {
         "README.md": "4af346003ab3d68a78fd72a454e2d908814235be642b1d0be9b614f30e0fe635",
-        "backup.md": "871dbbe0e2709392bb688917a3429fa1d918e4f2061a3affd246d4cbf7063f8e",
+        "docs/BACKUP_PLAN.md": "871dbbe0e2709392bb688917a3429fa1d918e4f2061a3affd246d4cbf7063f8e",
         "docs/BACKUP_VIDEO_SCRIPT.md": "ec682fbe6a2e72d80f71cea0abbde1665be61bb4f9fc066881e559da950b5d1b",
         "docs/CONTRACT.md": "e66f7600e2130f6b1b1a38478a4ccad4bdcba65133371f633bbf13e4da3d57c2",
         "docs/DEMO_SCRIPT.md": "478a11207382c0108af45b03c452ca32575b0bc30f6f7242ecf2e7dca790d526",
@@ -153,8 +153,7 @@
         "docs/fixtures/mock-obstacle.json": "4d6d85692392b6e9b6f6c885937e5bba7ba5a9f450a5e08495356d604b3d9604",
         "docs/fixtures/mock-paused.json": "e65ef003e12132bb67eba76b2c347ad2f2c4175a37b8507068ef64add63db058",
         "docs/fixtures/mock-pending.json": "4990f4cf912675350b7c47b1b88608c5ce4da24124bf1e6e39f69f4aea1633be",
-        "docs/fixtures/mock-resolved.json": "60327ec3f544f65670c12037cbc3fccf9e73eb1d54fffb97f9de6f944f001445",
-        "docs/JUDGE_QUESTIONS.md": "79559950326d609bff279ec77b7b647f9d8a10ebaa9cb3e2d53ade90db572a10"
+        "docs/fixtures/mock-resolved.json": "60327ec3f544f65670c12037cbc3fccf9e73eb1d54fffb97f9de6f944f001445"
       }
     },
     "reference": {
