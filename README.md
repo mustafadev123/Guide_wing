@@ -263,8 +263,6 @@ models/              downloaded model files (git-ignored)
 
 Useful docs: [CONTRACT](docs/CONTRACT.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [FRONTEND](docs/FRONTEND.md) · [GEMINI_ANALYTICS](docs/GEMINI_ANALYTICS.md) · [LIMITATIONS](docs/LIMITATIONS.md) · [SUBMISSION_CHECKLIST](docs/SUBMISSION_CHECKLIST.md). Agent orientation: [AGENTS.md](AGENTS.md).
 
-**Contributors (from the git history):** Muhammad Mustufa, Andrii Fil.
-
 **Third-party components**
 
 | Component | Use | License |
