@@ -1,4 +1,4 @@
-// Minimal client for the GuideWing backend (same REST endpoints the web pages use)
+// Minimal client for the GuideWing backend: the responder endpoints the /responder desk uses,
 // plus the browser event stream (/ws/events) with automatic reconnection.
 
 export type IncidentStatus = "pending" | "dispatched" | "acknowledged" | "cancelled" | "resolved";
@@ -7,34 +7,23 @@ export type RequestSource = "gesture" | "button" | "test" | "imessage";
 export interface Location {
   source: "simulated" | "device" | "unavailable";
   landmark: string | null;
-}
-export interface Journey {
-  id: string;
-  status: "idle" | "active" | "paused" | "ended";
-  armed: boolean;
-  pause_reason: "user" | "obstruction" | "help_request" | null;
-  route_progress: number;
-  location: Location;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 export interface Incident {
   id: string;
   journey_id: string;
   status: IncidentStatus;
   request_source: RequestSource;
+  created_at: string;
   dispatched_at: string | null;
-}
-export interface SnapshotIncident {
-  id: string;
-  status: IncidentStatus;
-  request_source: RequestSource;
-  seconds_until_dispatch: number | null;
-}
-export interface Snapshot {
-  boot_id: string;
-  journey: Journey;
-  active_incident: SnapshotIncident | null;
-  last_incident: SnapshotIncident | null;
-  vision: { obstruction_active: boolean };
+  acknowledged_at: string | null;
+  cancelled_at: string | null;
+  resolved_at: string | null;
+  location: Location;
+  responder: string | null;
+  snapshot_url: string | null;
+  is_test: boolean;
 }
 export interface ServerEvent {
   boot_id: string;
@@ -51,12 +40,11 @@ export class BackendError extends Error {
   }
 }
 
+/** Responder-side operations: the same endpoints the /responder desk uses. */
 export interface Backend {
-  snapshot(): Promise<Snapshot>;
-  createJourney(): Promise<Journey>;
-  journeyAction(id: string, action: "start" | "pause" | "resume"): Promise<Journey>;
-  requestHelp(journeyId: string, requestKey: string): Promise<{ incident: Incident; created: boolean }>;
-  cancel(incidentId: string): Promise<{ incident: Incident; changed: boolean }>;
+  incidents(status?: IncidentStatus): Promise<Incident[]>;
+  accept(incidentId: string, responder: string): Promise<{ incident: Incident; changed: boolean }>;
+  resolve(incidentId: string): Promise<{ incident: Incident; changed: boolean }>;
 }
 
 export class GuideWingClient implements Backend {
@@ -80,18 +68,14 @@ export class GuideWingClient implements Backend {
     return data as T;
   }
 
-  snapshot() { return this.call<Snapshot>("GET", "/api/simulation/state?journey_id=current"); }
-  createJourney() { return this.call<Journey>("POST", "/api/journeys"); }
-  journeyAction(id: string, action: "start" | "pause" | "resume") {
-    return this.call<Journey>("POST", `/api/journeys/${encodeURIComponent(id)}/${action}`);
+  incidents(status?: IncidentStatus) {
+    return this.call<Incident[]>("GET", `/api/incidents?limit=50${status ? `&status=${status}` : ""}`);
   }
-  requestHelp(journeyId: string, requestKey: string) {
-    return this.call<{ incident: Incident; created: boolean }>("POST", "/api/incidents", {
-      journey_id: journeyId, request_key: requestKey, request_source: "imessage",
-    });
+  accept(incidentId: string, responder: string) {
+    return this.call<{ incident: Incident; changed: boolean }>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/accept`, { responder });
   }
-  cancel(incidentId: string) {
-    return this.call<{ incident: Incident; changed: boolean }>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/cancel`);
+  resolve(incidentId: string) {
+    return this.call<{ incident: Incident; changed: boolean }>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/resolve`);
   }
 
   /** Subscribe to /ws/events. Calls onOpen after every (re)connect so the caller can resync. */

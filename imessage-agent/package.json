@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "GuideWing companion in iMessage via Photon Spectrum",
+  "description": "GuideWing responder agent in iMessage via Photon Spectrum",
   "scripts": {
     "start": "node src/main.ts",
     "start:terminal": "node src/main.ts --terminal",

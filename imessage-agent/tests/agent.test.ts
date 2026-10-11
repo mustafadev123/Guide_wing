@@ -1,153 +1,183 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GuideWingAgent, SendLimiter, maskSender, parseCommand } from "../src/agent.ts";
-import type { Backend, Incident, Journey, ServerEvent, Snapshot } from "../src/guidewing.ts";
+import { GuideWingAgent, SendLimiter, maskSender, parseCommand, responderName } from "../src/agent.ts";
+import type { Backend, Incident, ServerEvent } from "../src/guidewing.ts";
 import * as say from "../src/messages.ts";
 
-const ME = "+15550001111";
+const A = "+15550001111";
+const B = "+15550002222";
 
-function journey(over: Partial<Journey> = {}): Journey {
-  return { id: "j1", status: "active", armed: true, pause_reason: null, route_progress: 0.2,
-    location: { source: "simulated", landmark: "Library crossing" }, ...over };
+function inc(status: Incident["status"], over: Partial<Incident> = {}): Incident {
+  return {
+    id: "i1", journey_id: "j1", status, request_source: "button", created_at: "2026-10-11T07:00:00Z",
+    dispatched_at: status === "pending" ? null : "2026-10-11T07:00:10Z", acknowledged_at: null, cancelled_at: null,
+    resolved_at: null, location: { source: "simulated", landmark: "Library crossing" }, responder: null,
+    snapshot_url: null, is_test: false, ...over,
+  };
 }
 
 class FakeBackend implements Backend {
-  snap: Snapshot = { boot_id: "b", journey: journey(), active_incident: null, last_incident: null, vision: { obstruction_active: false } };
+  list: Incident[] = [];
   calls: string[] = [];
   down = false;
-  async snapshot() { if (this.down) throw new TypeError("fetch failed"); this.calls.push("snapshot"); return structuredClone(this.snap); }
-  async createJourney() { this.calls.push("createJourney"); return journey({ id: "j2", status: "idle", armed: false }); }
-  async journeyAction(id: string, action: string) { this.calls.push(`${action}:${id}`); return journey({ id }); }
-  async requestHelp(journeyId: string, key: string) {
-    this.calls.push(`help:${journeyId}:${key}`);
-    return { incident: inc("pending"), created: true };
+  onCall: () => void = () => {};
+  async incidents() { if (this.down) throw new TypeError("fetch failed"); return structuredClone(this.list); }
+  async accept(id: string, responder: string) {
+    this.calls.push(`accept:${id}:${responder}`);
+    this.onCall();
+    const cur = this.list.find((i) => i.id === id)!;
+    if (cur.status !== "dispatched") return { incident: structuredClone(cur), changed: false };
+    Object.assign(cur, { status: "acknowledged", responder, acknowledged_at: "2026-10-11T07:00:20Z" });
+    return { incident: structuredClone(cur), changed: true };
   }
-  async cancel(id: string) { this.calls.push(`cancel:${id}`); return { incident: inc("cancelled", this.snap.active_incident?.status === "dispatched"), changed: true }; }
+  async resolve(id: string) {
+    this.calls.push(`resolve:${id}`);
+    this.onCall();
+    const cur = this.list.find((i) => i.id === id)!;
+    Object.assign(cur, { status: "resolved", resolved_at: "2026-10-11T07:01:00Z" });
+    return { incident: structuredClone(cur), changed: true };
+  }
 }
 
-function inc(status: Incident["status"], wasDispatched = false): Incident {
-  return { id: "i1", journey_id: "j1", status, request_source: "imessage", dispatched_at: wasDispatched || status === "dispatched" ? "t" : null };
+function responders(agent: GuideWingAgent) {
+  const sent: Record<string, string[]> = { [A]: [], [B]: [] };
+  const convo = (who: string) => ({ id: `space-${who}`, send: async (t: string) => { sent[who]!.push(t); } });
+  const text = (who: string, t: string) => agent.handleText(who, convo(who), t);
+  return { sent, text };
 }
 
-function conversation() {
-  const sent: string[] = [];
-  return { sent, convo: { id: "space-1", send: async (t: string) => { sent.push(t); } } };
-}
+const event = (incident: Incident, transition: string = incident.status): ServerEvent =>
+  ({ boot_id: "b", sequence: 1, type: "incident.updated", payload: { incident, transition } });
+const tick = () => new Promise((r) => setImmediate(r));
 
-const event = (type: string, payload: Record<string, unknown>): ServerEvent => ({ boot_id: "b", sequence: 1, type, payload });
-
-test("parseCommand: deliberate keywords; cancel wins over help", () => {
-  assert.equal(parseCommand("HELP"), "help");
-  assert.equal(parseCommand("I need help please!"), "help");
-  assert.equal(parseCommand("sos"), "help");
-  assert.equal(parseCommand("cancel help"), "cancel");
-  assert.equal(parseCommand("Stop"), "cancel");
-  assert.equal(parseCommand("status?"), "status");
-  assert.equal(parseCommand("start"), "start");
-  assert.equal(parseCommand("resume"), "resume");
+test("parseCommand: responder keywords", () => {
+  assert.equal(parseCommand("ACCEPT"), "accept");
+  assert.equal(parseCommand("yes, on my way"), "accept");
+  assert.equal(parseCommand("Resolved!"), "resolve");
+  assert.equal(parseCommand("done"), "resolve");
+  assert.equal(parseCommand("details?"), "details");
+  assert.equal(parseCommand("list"), "list");
+  assert.equal(parseCommand("status"), "list");
   assert.equal(parseCommand("hi there"), "menu");
-  assert.equal(parseCommand("?"), "menu");
 });
 
 test("unregistered senders are refused without touching the backend", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { convo } = conversation();
-  assert.equal(await agent.handleText("+19998887777", convo, "help", "m1"), say.NOT_ALLOWED);
+  b.list = [inc("dispatched")];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  assert.equal(await agent.handleText("+19998887777", { id: "x", send: async () => {} }, "accept"), say.NOT_ALLOWED);
   assert.deepEqual(b.calls, []);
 });
 
-test("help needs a started journey", async () => {
+test("a dispatched request is pushed once to every registered responder; pending is not", async () => {
   const b = new FakeBackend();
-  b.snap.journey = journey({ status: "idle", armed: false });
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { convo } = conversation();
-  assert.match((await agent.handleText(ME, convo, "help", "m1"))!, /reply START/i);
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A, B]) });
+  const { sent, text } = responders(agent);
+  await text(A, "list");
+  await text(B, "list");
+  agent.handleEvent(event(inc("pending"), "created"));
+  agent.handleEvent(event(inc("dispatched")));
+  agent.handleEvent(event(inc("dispatched"), "snapshot_attached"));
+  agent.handleEvent(event(inc("dispatched")));
+  await tick();
+  assert.deepEqual(sent[A], [say.newRequest(inc("dispatched"))]);
+  assert.deepEqual(sent[B], [say.newRequest(inc("dispatched"))]);
+  assert.match(sent[A]![0]!, /Library crossing \(simulated location\).*Help button.*Reply ACCEPT/);
 });
 
-test("help creates one imessage request keyed by message id; update sent once despite the event race", async () => {
+test("accept: first responder wins, the other is told; the acceptor is not pushed their own action", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { sent, convo } = conversation();
-  // backend event arrives before the HTTP reply returns
-  b.requestHelp = async (journeyId, key) => {
-    b.calls.push(`help:${journeyId}:${key}`);
-    agent.handleEvent(event("incident.updated", { incident: inc("pending"), transition: "created" }));
-    return { incident: inc("pending"), created: true };
-  };
-  agent["conversations"].set(ME, convo); // already registered conversation
-  assert.equal(await agent.handleText(ME, convo, "help", "msg-42"), null);
-  assert.ok(b.calls.includes("help:j1:imessage-msg-42"));
-  agent.handleEvent(event("incident.updated", { incident: inc("pending"), transition: "created" })); // duplicate event
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(sent, [say.incidentUpdate("pending", "imessage", false)]);
+  b.list = [inc("dispatched")];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A, B]) });
+  const { sent, text } = responders(agent);
+  await text(A, "list");
+  await text(B, "list");
+  // the backend event arrives before the HTTP reply returns
+  b.onCall = () => agent.handleEvent(event(inc("acknowledged", { responder: responderName(A) })));
+  assert.match(await text(A, "accept"), /^You accepted the request near Library crossing.*Reply RESOLVED/);
+  assert.deepEqual(b.calls, ["accept:i1:iMessage responder (…1111)"]);
+  await tick();
+  assert.deepEqual(sent[A], []);
+  assert.deepEqual(sent[B], ["The request near Library crossing (simulated location) was accepted by iMessage responder (…1111). No action needed."]);
+  assert.equal(await text(B, "accept"), "Already accepted by iMessage responder (…1111).");
+  assert.match(await text(B, "resolved"), /accepted by iMessage responder \(…1111\), so they resolve it/);
+  assert.match(await text(A, "accept"), /You already accepted/);
 });
 
-test("dispatch and acceptance are pushed once each; snapshot attachments are ignored", async () => {
+test("resolve: only your accepted request; others are told", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { sent, convo } = conversation();
-  await agent.handleText(ME, convo, "status", "m1"); // registers the conversation
-  for (const transition of ["dispatched", "snapshot_attached", "dispatched"]) {
-    agent.handleEvent(event("incident.updated", { incident: inc("dispatched"), transition }));
-  }
-  agent.handleEvent(event("incident.updated", { incident: inc("acknowledged", true), transition: "acknowledged" }));
-  agent.handleEvent(event("incident.updated", { incident: inc("acknowledged", true), transition: "acknowledged" }));
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(sent, ["Your help request was sent to the responder. Waiting for acceptance.", "A responder accepted your request."]);
-  assert.equal(await agent.handleText(ME, convo, "repeat", "m2"), "A responder accepted your request.");
+  b.list = [inc("dispatched")];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A, B]) });
+  const { sent, text } = responders(agent);
+  await text(B, "list");
+  assert.match(await text(A, "resolved"), /Accept the request first/);
+  await text(A, "accept");
+  assert.equal(await text(A, "done"), say.youResolved(b.list[0]!));
+  agent.handleEvent(event(b.list[0]!)); // late resolved event: not repeated to A
+  await tick();
+  assert.deepEqual(sent[A], []);
+  assert.deepEqual(sent[B], [say.acceptedByOther(inc("acknowledged", { responder: responderName(A) })), say.resolvedByOther(b.list[0]!)]);
+  assert.equal(await text(A, "resolved"), "You have no accepted request to resolve.");
 });
 
-test("cancel rules follow the backend lifecycle", async () => {
+test("accept during the cancellation window explains the wait; nothing open is said plainly", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { sent, convo } = conversation();
-  assert.equal(await agent.handleText(ME, convo, "cancel", "m1"), "There is no help request to cancel.");
-  b.snap.active_incident = { id: "i1", status: "acknowledged", request_source: "imessage", seconds_until_dispatch: null };
-  assert.match((await agent.handleText(ME, convo, "cancel", "m2"))!, /already accepted/);
-  b.snap.active_incident = { id: "i1", status: "dispatched", request_source: "imessage", seconds_until_dispatch: null };
-  assert.equal(await agent.handleText(ME, convo, "cancel", "m3"), null);
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(sent, ["Help request cancelled. The responder was notified."]);
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const { text } = responders(agent);
+  assert.equal(await text(A, "accept"), "There is no request waiting for a responder.");
+  b.list = [inc("pending")];
+  assert.match(await text(A, "accept"), /10-second cancellation window/);
+  assert.deepEqual(b.calls, []);
 });
 
-test("obstacle warnings only when the backend says to announce", async () => {
+test("user cancellation after dispatch is pushed; cancellation inside the window is not", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { sent, convo } = conversation();
-  await agent.handleText(ME, convo, "status", "m1");
-  agent.handleEvent(event("vision.obstacle", { observation_id: "o1", announce: false, journey_paused: false }));
-  agent.handleEvent(event("vision.obstacle", { observation_id: "o2", announce: true, journey_paused: true }));
-  agent.handleEvent(event("vision.obstacle", { observation_id: "o2", announce: true, journey_paused: true }));
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(sent, [say.obstacleWarning(true)]);
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const { sent, text } = responders(agent);
+  await text(A, "list");
+  agent.handleEvent(event(inc("cancelled", { id: "i0", dispatched_at: null })));
+  agent.handleEvent(event(inc("cancelled")));
+  await tick();
+  assert.deepEqual(sent[A], ["The user cancelled the request near Library crossing (simulated location). No action needed."]);
 });
 
-test("first resync only seeds; a later resync announces a change missed while disconnected", async () => {
+test("details and list show the recorded facts", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { sent, convo } = conversation();
-  await agent.handleText(ME, convo, "status", "m1");
-  b.snap.last_incident = { id: "i9", status: "dispatched", request_source: "button", seconds_until_dispatch: null };
+  b.list = [inc("dispatched", { snapshot_url: "/api/incidents/i1/snapshot" })];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const { text } = responders(agent);
+  const d = await text(A, "details");
+  assert.match(d, /Status: dispatched\. Requested with the Help button\./);
+  assert.match(d, /Requested 07:00:00 UTC, dispatched 07:00:10 UTC/);
+  assert.match(d, /blurred camera snapshot/);
+  assert.match(await text(A, "list"), /1\) near Library crossing: waiting for acceptance/);
+});
+
+test("first resync only seeds; a later resync pushes a request missed while disconnected", async () => {
+  const b = new FakeBackend();
+  b.list = [inc("resolved", { id: "old" })];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const { sent, text } = responders(agent);
+  await text(A, "list");
   await agent.resync();
-  b.snap.last_incident = { id: "i9", status: "acknowledged", request_source: "button", seconds_until_dispatch: null };
+  b.list.unshift(inc("dispatched"));
   await agent.resync();
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(sent, ["A responder accepted your request."]);
+  await agent.resync();
+  await tick();
+  assert.deepEqual(sent[A], [say.newRequest(inc("dispatched"))]);
 });
 
-test("server unreachable is said plainly; status labels the simulated location", async () => {
+test("server unreachable is said plainly", async () => {
   const b = new FakeBackend();
-  const agent = new GuideWingAgent(b, { allowedSenders: new Set([ME]) });
-  const { convo } = conversation();
-  assert.match((await agent.handleText(ME, convo, "status", "m1"))!, /simulated location near Library crossing/);
   b.down = true;
-  assert.equal(await agent.handleText(ME, convo, "help", "m2"), say.SERVER_DOWN);
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  assert.equal(await responders(agent).text(A, "accept"), say.SERVER_DOWN);
 });
 
-test("sender numbers are masked in logs", () => {
+test("sender numbers are masked in logs and responder names", () => {
   assert.equal(maskSender("+15550001111"), "********1111");
   assert.equal(maskSender(undefined), "unknown");
+  assert.equal(responderName("+15550001111"), "iMessage responder (…1111)");
 });
 
 test("send limiter caps bursts and per-minute volume per conversation (loop protection)", () => {

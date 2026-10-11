@@ -259,4 +259,10 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
   - Free-tier shared lines can change: first +1 646-279-2668, then +1 717-481-1829.
 - **First live `status` reached the agent** (06:52:22) and was answered. The agent then **looped**, answering non-text events with a "text only" message. It was stopped immediately.
 - **Loop fix:** non-text and own messages are ignored, and `SendLimiter` caps sends at 4 per 10 s and 15 per minute per conversation. Agent tests are now **13/13** (11 unit + 2 against the real backend).
+- **Switched to the responder perspective** (the user-side companion duplicated `/user` and wasn't useful in a demo):
+  - Registered responders receive each new request once it is dispatched, and reply `accept` / `resolved` / `details` / `list`.
+  - The agent uses the desk's accept/resolve endpoints. The responder is recorded as "iMessage responder (…last 4)". The first acceptor wins; other responders are told who accepted, and an actor is never pushed their own action.
+  - User cancellation after dispatch is pushed; cancellation inside the window is never sent.
+  - **Tests: 14/14** (12 unit + 2 against the real backend: a user requests through the API, responder A accepts and resolves, responder B is told; and the cancellation cases). Strict typecheck passes.
+  - Backend request source `imessage` is kept but no longer used by the agent.
 

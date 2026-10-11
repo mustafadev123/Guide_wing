@@ -1,11 +1,11 @@
-// Entry point: connect the GuideWing agent to Photon Spectrum.
+// Entry point: connect the GuideWing responder agent to Photon Spectrum.
 //
 //   node src/main.ts             iMessage via Photon Spectrum Cloud (needs SPECTRUM_PROJECT_ID/SECRET)
 //   node src/main.ts --terminal  Spectrum's local terminal chat, no Photon account (development)
 //
 // Configuration (imessage-agent/.env, git-ignored; see .env.example):
 //   SPECTRUM_PROJECT_ID, SPECTRUM_PROJECT_SECRET   from app.photon.codes
-//   GUIDEWING_IMESSAGE_ALLOWED                     comma-separated E.164 numbers allowed to use the agent
+//   GUIDEWING_IMESSAGE_ALLOWED                     comma-separated E.164 responder numbers allowed to use the agent
 //   GUIDEWING_URL                                  backend URL (default http://127.0.0.1:8000)
 
 import { existsSync } from "node:fs";
@@ -22,7 +22,7 @@ const log = (msg: string) => console.error(`${new Date().toISOString().slice(11,
 
 const allowed = (process.env.GUIDEWING_IMESSAGE_ALLOWED ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 if (!terminalMode && allowed.length === 0) {
-  log("GUIDEWING_IMESSAGE_ALLOWED is empty: set the registered iPhone number(s), e.g. +15551234567. Refusing to start.");
+  log("GUIDEWING_IMESSAGE_ALLOWED is empty: set the registered responder number(s), e.g. +15551234567. Refusing to start.");
   process.exit(2);
 }
 
@@ -47,7 +47,7 @@ async function createApp() {
 
 const unsubscribe = client.subscribe((e) => agent.handleEvent(e), () => { void agent.resync(); }, log);
 const app = await createApp();
-log(`connected (${terminalMode ? "terminal" : "iMessage via Photon Spectrum"}); allowed senders: ${terminalMode ? "all (terminal)" : allowed.map(maskSender).join(", ")}`);
+log(`connected (${terminalMode ? "terminal" : "iMessage via Photon Spectrum"}); responders: ${terminalMode ? "all (terminal)" : allowed.map(maskSender).join(", ")}`);
 
 let stopping = false;
 const shutdown = async () => {
@@ -77,7 +77,7 @@ for await (const [space, message] of app.messages) {
       return space.send(t);
     };
     const conversation = { id: space.id, send };
-    const reply = await space.responding(() => agent.handleText(message.sender?.id, conversation, text, message.id));
+    const reply = await space.responding(() => agent.handleText(message.sender?.id, conversation, text));
     if (reply) await send(reply);
   } catch (e) {
     log(`message handling failed: ${(e as Error).name}`);

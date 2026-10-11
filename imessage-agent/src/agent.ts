@@ -1,28 +1,26 @@
-// GuideWing companion agent: platform-independent core.
+// GuideWing responder agent: platform-independent core.
 // main.ts connects it to Photon Spectrum (iMessage) or the Spectrum terminal provider.
 //
+// Registered responders get new help requests in iMessage and can accept and resolve them there.
 // Rules:
-// - The GuideWing backend owns every decision (deadlines, dispatch, acceptance). The agent only
-//   calls the same endpoints as the web page and relays updates.
-// - Every update is sent once per conversation, keyed by incident id + status or obstacle id,
-//   whether it comes from a command reply or from the backend event stream.
-// - Only allowlisted senders may control the journey (when an allowlist is configured).
+// - The GuideWing backend owns every decision (cancellation window, dispatch, who accepted first).
+//   The agent only calls the same endpoints as the /responder desk and relays updates.
+// - Every update is sent once, keyed by incident id + status, whether the change came from
+//   iMessage, the web desk or the user. A responder is not told about their own action twice.
+// - Only allowlisted senders may act as responders (when an allowlist is configured).
 
-import { BackendError, type Backend, type Incident, type ServerEvent, type Snapshot } from "./guidewing.ts";
+import { BackendError, type Backend, type Incident, type ServerEvent } from "./guidewing.ts";
 import * as say from "./messages.ts";
 
-export type Command = "help" | "cancel" | "status" | "start" | "pause" | "resume" | "repeat" | "menu";
+export type Command = "accept" | "resolve" | "details" | "list" | "menu";
 
 export function parseCommand(text: string): Command {
   const words = new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean));
   const has = (...w: string[]) => w.some((x) => words.has(x));
-  if (has("cancel", "stop")) return "cancel"; // "cancel help" must cancel, never create
-  if (has("help", "sos")) return "help";
-  if (has("status", "update", "where")) return "status";
-  if (has("start", "begin")) return "start";
-  if (has("pause")) return "pause";
-  if (has("resume", "continue")) return "resume";
-  if (has("repeat", "again")) return "repeat";
+  if (has("resolve", "resolved", "done", "complete", "completed", "handled")) return "resolve";
+  if (has("accept", "accepted", "yes", "omw", "coming")) return "accept";
+  if (has("details", "detail", "info", "where", "more")) return "details";
+  if (has("list", "status", "open", "requests")) return "list";
   return "menu";
 }
 
@@ -32,7 +30,7 @@ export interface Conversation {
 }
 
 export interface AgentOptions {
-  /** E.164 numbers / emails allowed to control the journey; null = allow everyone (terminal dev only). */
+  /** E.164 numbers allowed to act as responders; null = allow everyone (terminal dev only). */
   allowedSenders: Set<string> | null;
   log?: (message: string) => void;
 }
@@ -42,12 +40,19 @@ export function maskSender(id: string | undefined): string {
   return id.length <= 4 ? "****" : `${"*".repeat(Math.max(0, id.length - 4))}${id.slice(-4)}`;
 }
 
+/** Name recorded on the incident (shown on /user and /responder). Never the full number. */
+export function responderName(senderId: string | undefined): string {
+  return senderId && senderId.length > 4 ? `iMessage responder (…${senderId.slice(-4)})` : "iMessage responder";
+}
+
+const OPEN = new Set(["pending", "dispatched", "acknowledged"]);
+const byAge = (a: Incident, b: Incident) => Date.parse(a.created_at) - Date.parse(b.created_at);
+
 export class GuideWingAgent {
   private readonly conversations = new Map<string, Conversation>(); // sender id -> latest conversation
-  private readonly announced = new Set<string>();
-  private readonly lastMessage = new Map<string, string>(); // conversation id -> last update sent
+  private readonly announced = new Set<string>(); // incident:id:status already pushed
+  private readonly ownActions = new Map<string, string>(); // incident:id:status -> sender who did it here
   private readonly known = new Map<string, string>(); // incident id -> last status seen
-  private readonly dispatched = new Set<string>(); // incident ids that reached dispatch
   private seeded = false;
   private readonly log: (message: string) => void;
   private readonly backend: Backend;
@@ -63,117 +68,133 @@ export class GuideWingAgent {
     return this.options.allowedSenders === null || (!!senderId && this.options.allowedSenders.has(senderId));
   }
 
-  /** Handle one inbound text. Returns a direct reply, or null when the update was already sent. */
-  async handleText(senderId: string | undefined, conversation: Conversation, text: string, messageId: string): Promise<string | null> {
+  /** Handle one inbound text from a responder. Returns the direct reply. */
+  async handleText(senderId: string | undefined, conversation: Conversation, text: string): Promise<string> {
     if (!this.isAllowed(senderId)) {
       this.log(`refused message from ${maskSender(senderId)}`);
       return say.NOT_ALLOWED;
     }
-    this.conversations.set(senderId ?? conversation.id, conversation);
+    const who = senderId ?? conversation.id;
+    this.conversations.set(who, conversation);
     const command = parseCommand(text);
     this.log(`command ${command} from ${maskSender(senderId)}`);
     try {
-      return await this.run(command, conversation, messageId);
+      return await this.run(command, who);
     } catch (e) {
-      if (e instanceof BackendError) return `${e.message.replace(/\.$/, "")}. Reply STATUS for an update.`;
+      if (e instanceof BackendError) return `${e.message.replace(/\.$/, "")}. Reply LIST to see open requests.`;
       this.log(`backend unreachable: ${(e as Error).name}`);
       return say.SERVER_DOWN;
     }
   }
 
-  private async run(command: Command, conversation: Conversation, messageId: string): Promise<string | null> {
+  private async run(command: Command, who: string): Promise<string> {
     if (command === "menu") return say.MENU;
-    if (command === "repeat") return this.lastMessage.get(conversation.id) ?? "There is no message to repeat yet.";
-    const snap = await this.backend.snapshot();
-    const journey = snap.journey;
+    const me = responderName(who);
+    const open = (await this.backend.incidents()).filter((i) => OPEN.has(i.status)).sort(byAge);
+    const mine = open.filter((i) => i.status === "acknowledged" && i.responder === me);
+    const waiting = open.filter((i) => i.status === "dispatched");
     switch (command) {
-      case "status":
-        return say.describeStatus(snap);
-      case "start": {
-        if (journey.status === "active" || journey.status === "paused") return `Your journey is already ${journey.status}. ${say.describeStatus(snap)}`;
-        const id = journey.status === "ended" ? (await this.backend.createJourney()).id : journey.id;
-        await this.backend.journeyAction(id, "start");
-        return "Journey started. Movement and location are simulated. Reply HELP at any time to request assistance.";
+      case "list":
+        return say.list(open);
+      case "details": {
+        const focus = mine[0] ?? waiting[0] ?? open[0] ?? (await this.backend.incidents())[0];
+        return focus ? say.details(focus) : "There are no help requests yet.";
       }
-      case "pause":
-        if (journey.status !== "active") return `Your journey is ${journey.status}, so there is nothing to pause.`;
-        await this.backend.journeyAction(journey.id, "pause");
-        return "Journey paused.";
-      case "resume":
-        if (journey.status !== "paused") return `Your journey is ${journey.status}, so there is nothing to resume.`;
-        await this.backend.journeyAction(journey.id, "resume");
-        return "Journey resumed.";
-      case "help": {
-        if (snap.active_incident) return `A help request is already ${say.describeStatus(snap).split("Help: ")[1]?.replace(/\.$/, "") ?? "active"}.`;
-        if (!journey.armed) return journey.status === "ended" ? "This journey has ended. Reply START for a new journey, then HELP." : "Start your journey first: reply START, then HELP.";
-        const { incident } = await this.backend.requestHelp(journey.id, `imessage-${messageId}`);
-        this.relay(incident); // the update itself is the reply; sent once even if the event arrived first
-        return null;
+      case "accept": {
+        const target = waiting[0];
+        if (!target) {
+          if (mine[0]) return `You already accepted the request near ${say.where(mine[0])}. Reply RESOLVED when it is handled.`;
+          const pending = open.find((i) => i.status === "pending");
+          if (pending) return say.pendingNote(pending);
+          const taken = open.find((i) => i.status === "acknowledged");
+          return taken ? say.alreadyAccepted(taken) : "There is no request waiting for a responder.";
+        }
+        return this.act(who, target, "acknowledged", () => this.backend.accept(target.id, me), say.youAccepted, say.alreadyAccepted);
       }
-      case "cancel": {
-        const active = snap.active_incident;
-        if (!active) return "There is no help request to cancel.";
-        if (active.status === "acknowledged") return "This request was already accepted by a responder, so it can no longer be cancelled here.";
-        const { incident } = await this.backend.cancel(active.id);
-        this.relay(incident);
-        return null;
+      case "resolve": {
+        const target = mine[0];
+        if (!target) {
+          if (waiting[0]) return `Accept the request first: reply ACCEPT. ${say.where(waiting[0])} is waiting.`;
+          const taken = open.find((i) => i.status === "acknowledged");
+          return taken ? `That request was accepted by ${taken.responder ?? "another responder"}, so they resolve it.` : "You have no accepted request to resolve.";
+        }
+        return this.act(who, target, "resolved", () => this.backend.resolve(target.id), say.youResolved,
+          (i) => `That request is already ${i.status}.`);
       }
     }
   }
 
-  /** Announce an incident status once (to every registered conversation). Returns true if sent now. */
-  private relay(incident: Pick<Incident, "id" | "status" | "request_source" | "dispatched_at">): boolean {
-    if (incident.dispatched_at || incident.status === "dispatched" || incident.status === "acknowledged") this.dispatched.add(incident.id);
-    this.known.set(incident.id, incident.status);
-    const text = say.incidentUpdate(incident.status, incident.request_source, this.dispatched.has(incident.id));
-    return this.announce(`incident:${incident.id}:${incident.status}`, text);
+  /**
+   * Perform a responder action. The actor is recorded before the call so the backend event,
+   * which can arrive before the HTTP reply, is not pushed back to the same person.
+   */
+  private async act(who: string, target: Incident, status: string,
+    call: () => Promise<{ incident: Incident; changed: boolean }>,
+    done: (i: Incident) => string, lost: (i: Incident) => string): Promise<string> {
+    const key = `incident:${target.id}:${status}`;
+    this.ownActions.set(key, who);
+    try {
+      const { incident, changed } = await call();
+      if (!changed) { this.ownActions.delete(key); return lost(incident); }
+      this.relay(incident);
+      return done(incident);
+    } catch (e) {
+      this.ownActions.delete(key);
+      throw e;
+    }
   }
 
-  private announce(key: string, text: string): boolean {
+  /** Push an incident status to every responder once. Returns true if sent now. */
+  private relay(incident: Incident): boolean {
+    this.known.set(incident.id, incident.status);
+    const text = this.pushText(incident);
+    if (!text) return false;
+    const key = `incident:${incident.id}:${incident.status}`;
     if (this.announced.has(key)) return false;
     this.announced.add(key); // set before any await: concurrent relays of the same key send once
-    for (const conversation of this.conversations.values()) {
-      this.lastMessage.set(conversation.id, text);
+    const actor = this.ownActions.get(key);
+    for (const [who, conversation] of this.conversations) {
+      if (who === actor) continue; // they already got the direct reply
       void conversation.send(text).catch((e) => this.log(`send failed: ${(e as Error).name}`));
     }
     return true;
   }
 
+  private pushText(i: Incident): string | null {
+    switch (i.status) {
+      case "dispatched": return say.newRequest(i);
+      case "acknowledged": return say.acceptedByOther(i);
+      case "resolved": return say.resolvedByOther(i);
+      case "cancelled": return i.dispatched_at ? say.cancelledByUser(i) : null; // never reached responders
+      default: return null; // pending: still in the user's cancellation window
+    }
+  }
+
   /** Backend event from /ws/events. */
   handleEvent(event: ServerEvent): void {
-    if (event.type === "incident.updated") {
-      const payload = event.payload as { incident: Incident; transition: string };
-      if (payload.transition === "snapshot_attached") return;
-      this.relay(payload.incident);
-    } else if (event.type === "vision.obstacle") {
-      const p = event.payload as { observation_id: string; announce: boolean; journey_paused: boolean };
-      if (p.announce) this.announce(`obstacle:${p.observation_id}`, say.obstacleWarning(p.journey_paused));
-    } else if (event.type === "journey.updated") {
-      const j = (event.payload as { journey: { id: string; status: string; route_progress: number } }).journey;
-      if (j.status === "ended" && j.route_progress >= 1) this.announce(`journey:${j.id}:arrived`, say.ARRIVED);
-    }
+    if (event.type !== "incident.updated") return;
+    const payload = event.payload as { incident: Incident; transition: string };
+    if (payload.transition === "snapshot_attached") return;
+    this.relay(payload.incident);
   }
 
   /**
    * Called on every (re)connect to the backend event stream. The first call only records the
-   * current state (no replay). Later calls announce a status change that happened while
-   * disconnected, so an acceptance is never silently missed.
+   * current state (no replay; LIST shows what is open). Later calls push changes that happened
+   * while disconnected, so a new request is never silently missed.
    */
   async resync(): Promise<void> {
-    let snap: Snapshot;
-    try { snap = await this.backend.snapshot(); } catch { return; }
-    const last = snap.last_incident;
+    let recent: Incident[];
+    try { recent = await this.backend.incidents(); } catch { return; }
     if (!this.seeded) {
       this.seeded = true;
-      if (last) {
-        this.announced.add(`incident:${last.id}:${last.status}`);
-        this.known.set(last.id, last.status);
+      for (const i of recent) {
+        this.known.set(i.id, i.status);
+        this.announced.add(`incident:${i.id}:${i.status}`);
       }
       return;
     }
-    if (last && this.known.get(last.id) !== last.status) {
-      this.relay({ id: last.id, status: last.status, request_source: last.request_source, dispatched_at: null });
-    }
+    for (const i of recent.sort(byAge)) if (this.known.get(i.id) !== i.status) this.relay(i);
   }
 }
 

@@ -27,7 +27,7 @@ if (-not (Test-Path (Join-Path $Agent "node_modules\spectrum-ts"))) {
     try { & (Join-Path (Split-Path $Node) "npm.cmd") ci --no-fund --no-audit } finally { Pop-Location }
 }
 if (-not $Terminal -and -not (Test-Path (Join-Path $Agent ".env"))) {
-    throw "Missing imessage-agent\.env. Copy imessage-agent\.env.example and fill in the Photon project values and your iPhone number."
+    throw "Missing imessage-agent\.env. Copy imessage-agent\.env.example and fill in the Photon project values and the responder number(s)."
 }
 try { Invoke-RestMethod "http://127.0.0.1:8000/api/health" -TimeoutSec 3 | Out-Null }
 catch { Write-Warning "GuideWing backend is not answering on 127.0.0.1:8000. Start it first: scripts\start.ps1" }
@@ -52,4 +52,4 @@ Set-Content -Path $PidFile -Value $proc.Id
 Start-Sleep 4
 if ($proc.HasExited) { throw "Agent exited early. See logs\imessage-agent.log" }
 Write-Host "iMessage agent running (PID $($proc.Id)). Log: logs\imessage-agent.log" -ForegroundColor Green
-Write-Host "Text the assigned Photon iMessage line from the registered iPhone. Stop with: powershell -ExecutionPolicy Bypass -File scripts\stop_imessage_agent.ps1"
+Write-Host "Text the assigned Photon iMessage line from each registered responder phone (so the agent can push new requests to it). Stop with: powershell -ExecutionPolicy Bypass -File scripts\stop_imessage_agent.ps1"

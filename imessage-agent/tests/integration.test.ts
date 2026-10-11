@@ -1,6 +1,7 @@
 // End-to-end against the REAL GuideWing backend: starts uvicorn from the project .venv on a free
-// port with a temporary database (2-second cancellation window for speed), then drives a full
-// conversation through the agent core and the live /ws/events stream. No Photon account needed.
+// port with a temporary database (2-second cancellation window for speed). A simulated user requests
+// help through the API; two responders accept and resolve through the agent core and the live
+// /ws/events stream. No Photon account needed.
 
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
@@ -16,9 +17,10 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const PYTHON = join(ROOT, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 const PORT = 8030 + Math.floor(Math.random() * 50);
 const BASE = `http://127.0.0.1:${PORT}`;
-const ME = "+15550002222";
+const A = "+15550001111";
+const B = "+15550002222";
 let server: ChildProcess;
-let unsubscribe = () => {};
+const unsubscribers: (() => void)[] = [];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function until<T>(fn: () => T | Promise<T>, ms = 15000): Promise<T> {
@@ -43,7 +45,7 @@ before(async () => {
 });
 
 after(() => {
-  unsubscribe();
+  for (const stop of unsubscribers) stop();
   if (server?.pid) {
     // the venv launcher starts a child python; end the whole tree
     if (process.platform === "win32") execSync(`taskkill /PID ${server.pid} /T /F`, { stdio: "ignore" });
@@ -51,63 +53,65 @@ after(() => {
   }
 });
 
-test("full conversation against the real backend", async () => {
+/** The simulated user presses Help (same endpoint as the /user page). */
+async function userRequest(key: string) {
+  const journey = (await api("GET", "/api/simulation/state?journey_id=current")).journey;
+  if (journey.status === "idle") await api("POST", `/api/journeys/${journey.id}/start`);
+  if (journey.status === "paused") await api("POST", `/api/journeys/${journey.id}/resume`);
+  return (await api("POST", "/api/incidents", { journey_id: journey.id, request_key: key, request_source: "button" })).incident;
+}
+
+async function setup() {
   const client = new GuideWingClient(BASE);
-  const agent = new GuideWingAgent(client, { allowedSenders: new Set([ME]) });
-  const sent: string[] = [];
-  const convo = { id: "space-it", send: async (t: string) => { sent.push(t); } };
+  const agent = new GuideWingAgent(client, { allowedSenders: new Set([A, B]) });
+  const sent: Record<string, string[]> = { [A]: [], [B]: [] };
+  const text = (who: string, t: string) => agent.handleText(who, { id: `space-${who}`, send: async (m: string) => { sent[who]!.push(m); } }, t);
   let ready = false;
-  unsubscribe = client.subscribe((e) => agent.handleEvent(e), () => { void agent.resync(); ready = true; }, () => {});
+  unsubscribers.push(client.subscribe((e) => agent.handleEvent(e), () => { void agent.resync(); ready = true; }, () => {}));
   await until(() => ready);
+  return { sent, text };
+}
 
-  assert.match((await agent.handleText(ME, convo, "start", "m1"))!, /Journey started/);
-  assert.equal((await api("GET", "/api/simulation/state?journey_id=current")).journey.status, "active");
+test("responders accept and resolve a user's request over the real backend", async () => {
+  const { sent, text } = await setup();
+  assert.equal(await text(A, "list"), "No open requests.");
+  await text(B, "list");
 
-  assert.equal(await agent.handleText(ME, convo, "help", "m2"), null);
-  await until(() => sent.some((t) => t.startsWith("Help request started")));
-  const incidents = await api("GET", "/api/incidents");
-  assert.equal(incidents.length, 1);
-  assert.equal(incidents[0].request_source, "imessage");
-  assert.equal(incidents[0].request_key, "imessage-m2");
+  const incident = await userRequest("it-user-request-1");
+  assert.match(await text(A, "accept"), /cancellation window/); // not dispatched yet
+  await until(() => sent[A]!.length && sent[B]!.length, 8000);
+  assert.match(sent[A]![0]!, /^New help request near .*\(simulated location\), requested with the Help button\. Reply ACCEPT/);
+  assert.deepEqual(sent[B], sent[A]);
 
-  // same message delivered twice -> still one request
-  await agent.handleText(ME, convo, "help", "m2");
-  assert.equal((await api("GET", "/api/incidents")).length, 1);
+  assert.match(await text(A, "ACCEPT"), /^You accepted the request/);
+  const accepted = await api("GET", `/api/incidents/${incident.id}`);
+  assert.equal(accepted.status, "acknowledged");
+  assert.equal(accepted.responder, "iMessage responder (…1111)");
+  await until(() => sent[B]!.length === 2);
+  assert.match(sent[B]![1]!, /accepted by iMessage responder \(…1111\)\. No action needed\./);
+  assert.equal(await text(B, "accept"), "Already accepted by iMessage responder (…1111).");
 
-  await until(() => sent.includes("Your help request was sent to the responder. Waiting for acceptance."), 8000);
-  assert.ok(sent.includes("Your help request was sent to the responder. Waiting for acceptance."), JSON.stringify(sent));
-
-  await api("POST", `/api/incidents/${incidents[0].id}/accept`, { responder: "Integration test" });
-  await until(() => sent.includes("A responder accepted your request."));
-  assert.match((await agent.handleText(ME, convo, "cancel", "m3"))!, /already accepted/);
-
-  await api("POST", `/api/incidents/${incidents[0].id}/resolve`);
-  await until(() => sent.includes("The responder marked your request as resolved."));
-
-  assert.match((await agent.handleText(ME, convo, "status", "m4"))!, /simulated location near .*Help: no active request/);
-  assert.equal(await agent.handleText("+19990000000", convo, "help", "m5"), "This GuideWing demo line only responds to registered numbers.");
-
-  // every update was texted exactly once, in order
-  assert.deepEqual(sent, [
-    "Help request started. It will be sent to a responder in 10 seconds. Reply CANCEL to stop it.",
-    "Your help request was sent to the responder. Waiting for acceptance.",
-    "A responder accepted your request.",
-    "The responder marked your request as resolved.",
-  ]);
+  assert.match(await text(A, "details"), /Status: acknowledged/);
+  assert.match(await text(A, "resolved"), /marked resolved\. Thank you\./);
+  assert.equal((await api("GET", `/api/incidents/${incident.id}`)).status, "resolved");
+  await until(() => sent[B]!.length === 3);
+  await sleep(300);
+  assert.equal(sent[A]!.length, 1, JSON.stringify(sent[A])); // only the new-request push
+  assert.match(sent[B]![2]!, /was marked resolved \(accepted by iMessage responder \(…1111\)\)/);
+  assert.equal(await text("+19990000000", "accept"), "This GuideWing responder line only responds to registered responder numbers.");
 });
 
-test("cancel inside the window over the real backend", async () => {
-  const client = new GuideWingClient(BASE);
-  const agent = new GuideWingAgent(client, { allowedSenders: new Set([ME]) });
-  const sent: string[] = [];
-  const convo = { id: "space-it2", send: async (t: string) => { sent.push(t); } };
-  await agent.resync();
-  await agent.handleText(ME, convo, "resume", "c0"); // journey paused by the previous request
-  await agent.handleText(ME, convo, "help", "c1");
-  assert.equal(await agent.handleText(ME, convo, "cancel", "c2"), null);
-  await sleep(2500); // past the 2 s window: must stay cancelled
-  const latest = (await api("GET", "/api/incidents"))[0];
-  assert.equal(latest.status, "cancelled");
-  assert.equal(latest.dispatched_at, null);
-  assert.equal(sent.at(-1), "Help request cancelled. Nothing was sent.");
+test("user cancellations: silent inside the window, pushed after dispatch", async () => {
+  const { sent, text } = await setup();
+  await text(A, "list");
+  const early = await userRequest("it-user-request-2");
+  await api("POST", `/api/incidents/${early.id}/cancel`);
+  await sleep(2500); // past the 2 s window: stays cancelled, nobody is told
+  assert.deepEqual(sent[A], []);
+
+  const late = await userRequest("it-user-request-3");
+  await until(() => sent[A]!.length === 1, 8000);
+  await api("POST", `/api/incidents/${late.id}/cancel`);
+  await until(() => sent[A]!.length === 2);
+  assert.match(sent[A]![1]!, /^The user cancelled the request near .*No action needed\.$/);
 });

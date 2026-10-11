@@ -1,52 +1,63 @@
-// Everything the agent says. Short, plain sentences that read well with VoiceOver.
-// The demo route and the responder are simulated; no real emergency service is contacted.
+// Everything the responder agent says. Short and plain.
+// The journey, the location and the dispatch organization are simulated; no real emergency service is contacted.
 
-import type { IncidentStatus, RequestSource, Snapshot } from "./guidewing.ts";
+import type { Incident, RequestSource } from "./guidewing.ts";
 
 export const MENU =
-  "GuideWing commands: HELP to request assistance, CANCEL to stop a request, STATUS for an update, " +
-  "START, PAUSE or RESUME for the journey, REPEAT for the last message. This is a demo; no real emergency service is contacted.";
-
-export function incidentUpdate(status: IncidentStatus, source: RequestSource, wasDispatched: boolean): string {
-  switch (status) {
-    case "pending":
-      return `${source === "gesture" ? "Open palm recognized. " : ""}Help request started. It will be sent to a responder in 10 seconds. Reply CANCEL to stop it.`;
-    case "dispatched":
-      return "Your help request was sent to the responder. Waiting for acceptance.";
-    case "acknowledged":
-      return "A responder accepted your request.";
-    case "cancelled":
-      return wasDispatched ? "Help request cancelled. The responder was notified." : "Help request cancelled. Nothing was sent.";
-    case "resolved":
-      return "The responder marked your request as resolved.";
-  }
-}
-
-export function obstacleWarning(journeyPaused: boolean): string {
-  return "Caution: obstruction detected in the path ahead." + (journeyPaused ? " Journey paused. Reply RESUME when ready." : "");
-}
-
-export const ARRIVED = "You reached the end of the demo route. Reply START for a new journey.";
+  "GuideWing responder commands: ACCEPT to take the waiting request, RESOLVED when it is handled, " +
+  "DETAILS for the recorded facts, LIST for open requests. Simulated demo: no real emergency service is contacted.";
+export const NOT_ALLOWED = "This GuideWing responder line only responds to registered responder numbers.";
 export const SERVER_DOWN =
   "The GuideWing server is unreachable right now, so your message was not processed. Please try again in a moment.";
-export const NOT_ALLOWED = "This GuideWing demo line only responds to registered numbers.";
 
-const STATUS_WORDS: Record<IncidentStatus, string> = {
-  pending: "starting, you can still cancel",
-  dispatched: "sent, waiting for a responder",
-  acknowledged: "accepted by a responder",
-  cancelled: "cancelled",
-  resolved: "resolved",
+const VIA: Record<RequestSource, string> = {
+  gesture: "an open-palm gesture",
+  button: "the Help button",
+  imessage: "an iMessage text",
+  test: "a developer TEST control (TEST request)",
 };
 
-export function describeStatus(s: Snapshot): string {
-  const j = s.journey;
-  const where = j.location.source === "unavailable"
-    ? "location unavailable"
-    : `${j.location.source === "simulated" ? "simulated location" : "location"} near ${j.location.landmark ?? "an unknown landmark"}`;
-  const journey = j.status === "idle" ? "not started"
-    : j.status === "ended" ? "ended"
-    : `${j.status}${j.status === "paused" && j.pause_reason ? ` (${j.pause_reason.replace("_", " ")})` : ""}, ${Math.round(j.route_progress * 100)}% of the demo route`;
-  const help = s.active_incident ? STATUS_WORDS[s.active_incident.status] : "no active request";
-  return `Journey: ${journey}, ${where}. Help: ${help}.`;
+export function where(i: Pick<Incident, "location">): string {
+  const loc = i.location;
+  if (loc.source === "unavailable") return "an unavailable location";
+  return `${loc.landmark ?? "an unknown landmark"} (${loc.source === "simulated" ? "simulated location" : "device location"})`;
+}
+
+export function age(iso: string | null, now = Date.now()): string {
+  if (!iso) return "unknown time";
+  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
+  return s < 60 ? `${s} s ago` : `${Math.round(s / 60)} min ago`;
+}
+
+const clock = (iso: string | null) => (iso ? `${iso.slice(11, 19)} UTC` : "not recorded");
+
+export const newRequest = (i: Incident) =>
+  `New help request near ${where(i)}, requested with ${VIA[i.request_source]}. Reply ACCEPT to take it, or DETAILS for more.`;
+export const youAccepted = (i: Incident) =>
+  `You accepted the request near ${where(i)}. The user has been told a responder accepted. Reply RESOLVED when it is handled.`;
+export const acceptedByOther = (i: Incident) =>
+  `The request near ${where(i)} was accepted by ${i.responder ?? "another responder"}. No action needed.`;
+export const alreadyAccepted = (i: Incident) => `Already accepted by ${i.responder ?? "another responder"}.`;
+export const cancelledByUser = (i: Incident) => `The user cancelled the request near ${where(i)}. No action needed.`;
+export const youResolved = (i: Incident) => `Request near ${where(i)} marked resolved. Thank you.`;
+export const resolvedByOther = (i: Incident) => `The request near ${where(i)} was marked resolved${i.responder ? ` (accepted by ${i.responder})` : ""}.`;
+
+export const pendingNote = (i: Incident) =>
+  `A request near ${where(i)} is in the user's 10-second cancellation window. You will get a message if it is sent.`;
+
+export function details(i: Incident): string {
+  return [
+    `Request near ${where(i)}${i.is_test ? " (TEST)" : ""}.`,
+    `Status: ${i.status}. Requested with ${VIA[i.request_source]}.`,
+    `Requested ${clock(i.created_at)}, dispatched ${clock(i.dispatched_at)}${i.acknowledged_at ? `, accepted ${clock(i.acknowledged_at)} by ${i.responder}` : ""}.`,
+    i.snapshot_url ? "A blurred camera snapshot is on the responder desk." : "No camera snapshot.",
+    "Location is from the simulated demo route.",
+  ].join("\n");
+}
+
+export function list(open: Incident[], now = Date.now()): string {
+  if (!open.length) return "No open requests.";
+  const label = { pending: "in cancellation window", dispatched: "waiting for acceptance", acknowledged: "accepted" } as Record<string, string>;
+  return "Open requests:\n" + open.map((i, n) =>
+    `${n + 1}) near ${i.location.landmark ?? "unknown"}: ${label[i.status] ?? i.status}${i.status === "acknowledged" && i.responder ? ` by ${i.responder}` : ""}, ${age(i.created_at, now)}`).join("\n");
 }
