@@ -1,6 +1,6 @@
 # API contract (backend ↔ browser ↔ Unreal)
 
-The source of truth is [backend/app/schemas.py](../backend/app/schemas.py). Interactive docs are at `http://127.0.0.1:8000/docs` while the server runs. Unreal-specific rules are in [UNREAL_INTEGRATION.md](UNREAL_INTEGRATION.md).
+Lifecycle/snapshot shapes are defined in [backend/app/schemas.py](../backend/app/schemas.py); optional aggregate analytics shapes are in [backend/app/analytics.py](../backend/app/analytics.py). Interactive docs are at `http://127.0.0.1:8000/docs` while the server runs. Unreal-specific rules are in [UNREAL_INTEGRATION.md](UNREAL_INTEGRATION.md).
 
 ## Ownership
 
@@ -37,12 +37,23 @@ pending --(10 s deadline, backend)--> dispatched --(responder accept)--> acknowl
 | POST | `/api/incidents/{id}/cancel` `/accept` `/resolve` | `accept` body `{responder}` is optional |
 | GET | `/api/incidents/{id}/snapshot` | Blurred JPEG only; 404 if none |
 | GET | `/api/incidents/{id}/briefing` | Deterministic text from recorded facts |
+| GET | `/api/analytics/config` | Safe provider/model configuration; key presence does not prove provider access |
+| POST | `/api/analytics/summary` | `{range: day\|week\|loaded, include_tests: boolean}`; defaults day/false; rejects extra fields; explicit server-computed aggregate Gemini summary |
+| GET | `/api/analytics/summary/{job_id}` | Existing job/snapshot only; never generates; 404 after restart or eviction |
 | GET | `/api/simulation/state?journey_id=` | Unreal and 2D snapshot; `mock-<scenario>` for fixtures |
 | GET | `/api/simulation/route` | Configured waypoints for the 2D view |
 | GET | `/api/vision/status` | `input_mode`, readiness, error, frame age, fps, inference ms, gesture state |
 | GET | `/api/vision/stream` | MJPEG annotated preview; 503 when there is no camera |
 | WS | `/ws/events` | Browser live updates (see below) |
 | POST | `/api/dev/reset`, `/api/dev/vision/{obstruction\|clear\|palm}` | Dev only (`GUIDEWING_DEV_CONTROLS=1`); observations labeled `test` |
+
+## Aggregate analytics
+
+Analytics does not alter the simulation schema or lifecycle transitions. POST reads the latest 500 incidents, filters by creation time using server UTC, excludes TEST by default, computes deterministic counts/timing samples and optionally starts a background Gemini job. The normal incident-list read still settles overdue dispatch deadlines. Only aggregate figures cross this provider boundary.
+
+The response includes `job_id`, `status` (`pending|ready|not_configured|empty|failed|rejected`), `provider`, `model`, `range`, `include_tests`, `as_of`, `from_at`, `scope`, `metrics`, `text`, `reason`, `cached` and `retry_after_s`. Metrics include total/status counts, mean `accepted_seconds` (dispatch to acceptance) and `resolved_seconds` (acceptance to resolution), with `accepted_sample` and `resolved_sample`. Missing/invalid/reversed timing pairs are excluded; unavailable means are null.
+
+SHA-256 job identity uses model/prompt version/selection/aggregates. Identical pending jobs join; ready results reuse for 15 minutes; failures cool down for 30 seconds. Jobs/text are memory-only, maximum 64 cached/two pending (409 when busy). GET reads without regeneration. Only explicit POST can regenerate/retry; refresh/navigation must not automatically resend. Keys stay server-side. Setup, privacy distinction from incident briefings and full details: [GEMINI_ANALYTICS.md](GEMINI_ANALYTICS.md).
 
 ## WebSocket events
 

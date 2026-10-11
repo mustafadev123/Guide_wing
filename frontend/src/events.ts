@@ -30,7 +30,10 @@ export function useServerEvents(onEvent: (e: ServerEvent) => void, onResync: () 
       const proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${location.host}/ws/events`);
       ws.onmessage = (msg) => {
-        const e = JSON.parse(msg.data) as ServerEvent;
+        if (closed) return;
+        let e: ServerEvent;
+        try { e = JSON.parse(msg.data) as ServerEvent; } catch { handlers.current.onResync(); return; }
+        if (!e || typeof e.type !== "string" || !e.payload) return;
         if (e.type === "hello") {
           setState("connected");
           retry = 0;
@@ -40,6 +43,7 @@ export function useServerEvents(onEvent: (e: ServerEvent) => void, onResync: () 
           return;
         }
         if (e.type === "ping") return;
+        if (e.boot_id === boot && e.sequence <= lastSeq) return;
         if (e.boot_id !== boot || e.sequence !== lastSeq + 1) {
           boot = e.boot_id;
           handlers.current.onResync();
@@ -70,30 +74,46 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs: number) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastOk, setLastOk] = useState<number | null>(null);
-  const inFlight = useRef(false);
+  const inFlight = useRef<Promise<T | null> | null>(null);
+  const alive = useRef(false);
   const fetchRef = useRef(fetcher);
   fetchRef.current = fetcher;
 
-  const refresh = useRef(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const refresh = useRef((): Promise<T | null> => {
+    if (inFlight.current) return inFlight.current;
+    const task = (async () => {
     try {
       const d = await fetchRef.current();
-      setData(d);
-      setError(null);
-      setLastOk(Date.now());
+      if (alive.current) { setData(d); setError(null); setLastOk(Date.now()); }
+      return d;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (alive.current) setError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
-      inFlight.current = false;
+      inFlight.current = null;
     }
+    })();
+    inFlight.current = task;
+    return task;
   }).current;
 
   useEffect(() => {
+    alive.current = true;
     refresh();
     const id = window.setInterval(refresh, intervalMs);
-    return () => window.clearInterval(id);
+    const visible = () => { if (!document.hidden) refresh(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { alive.current = false; window.clearInterval(id); document.removeEventListener("visibilitychange", visible); };
   }, [intervalMs, refresh]);
 
   return { data, error, lastOk, refresh };
+}
+
+export function useFreshness(lastOk: number | null, afterMs = 5000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return lastOk === null || now - lastOk > afterMs;
 }

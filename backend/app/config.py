@@ -69,6 +69,7 @@ class Settings:
     tts_cache_dir: Path = REPO_ROOT / "backend" / "data" / "tts_cache"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    gemini_analytics_model: str = "gemini-3.8-flash"
 
 
 def load_settings() -> Settings:
@@ -86,6 +87,7 @@ def load_settings() -> Settings:
     s.elevenlabs_model_id = _env("ELEVENLABS_MODEL_ID", s.elevenlabs_model_id)
     s.gemini_api_key = _env("GEMINI_API_KEY", "")
     s.gemini_model = _env("GEMINI_MODEL", s.gemini_model)
+    s.gemini_analytics_model = _env("GEMINI_ANALYTICS_MODEL", s.gemini_analytics_model)
 
     vs = s.vision
     vs.source = _env("GUIDEWING_VISION_SOURCE", vs.source)

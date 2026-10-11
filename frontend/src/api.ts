@@ -1,4 +1,4 @@
-// Typed client for the GuideWing backend. Field names mirror backend/app/schemas.py.
+// Typed client for the GuideWing backend: schemas.py plus analytics.py wire types.
 
 export type LocationSource = "simulated" | "device" | "unavailable";
 export type JourneyStatus = "idle" | "active" | "paused" | "ended";
@@ -108,6 +108,37 @@ export interface IncidentResult {
   changed: boolean;
 }
 
+export interface AnalyticsConfiguration {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
+  record_limit: number;
+}
+
+export interface AnalyticsReport {
+  job_id: string;
+  status: "pending" | "ready" | "not_configured" | "empty" | "failed" | "rejected";
+  provider: "gemini" | "unavailable";
+  model: string | null;
+  range: "day" | "week" | "loaded";
+  include_tests: boolean;
+  as_of: string;
+  from_at: string | null;
+  scope: string;
+  metrics: {
+    total: number;
+    counts: Record<IncidentStatus, number>;
+    accepted_seconds: number | null;
+    accepted_sample: number;
+    resolved_seconds: number | null;
+    resolved_sample: number;
+  };
+  text: string | null;
+  reason: string | null;
+  cached: boolean;
+  retry_after_s: number;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body: unknown) {
     super(message);
@@ -115,8 +146,12 @@ export class ApiError extends Error {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8000);
+  try {
   const res = await fetch(path, {
     method,
+    signal: controller.signal,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -127,9 +162,16 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     throw new ApiError(res.status, detail, data);
   }
   return data as T;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export const api = {
+  analyticsConfiguration: () => call<AnalyticsConfiguration>("GET", "/api/analytics/config"),
+  generateAnalyticsSummary: (range: AnalyticsReport["range"], includeTests: boolean) =>
+    call<AnalyticsReport>("POST", "/api/analytics/summary", { range, include_tests: includeTests }),
+  analyticsSummary: (id: string) => call<AnalyticsReport>("GET", `/api/analytics/summary/${encodeURIComponent(id)}`),
   snapshot: (journeyId = "current") =>
     call<SimulationState>("GET", `/api/simulation/state?journey_id=${encodeURIComponent(journeyId)}`),
   route: () => call<RouteInfo>("GET", "/api/simulation/route"),
@@ -143,7 +185,7 @@ export const api = {
       request_key: requestKey,
       request_source: "button",
     }),
-  incidents: () => call<Incident[]>("GET", "/api/incidents?limit=50"),
+  incidents: (limit = 50) => call<Incident[]>("GET", `/api/incidents?limit=${Math.max(1, Math.min(500, limit))}`),
   incident: (id: string) => call<Incident & { timeline: { type: string; at: string; detail: string | null }[] }>("GET", `/api/incidents/${id}`),
   cancel: (id: string) => call<IncidentResult>("POST", `/api/incidents/${id}/cancel`),
   accept: (id: string, responder: string) => call<IncidentResult>("POST", `/api/incidents/${id}/accept`, { responder }),
@@ -156,7 +198,9 @@ export const api = {
 };
 
 export function newRequestKey(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  // randomUUID requires HTTPS, but a phone on the demo LAN may use HTTP.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `${prefix}-${Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function formatTime(iso: string | null): string {

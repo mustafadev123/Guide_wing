@@ -72,9 +72,11 @@ The phone index on your laptop hasn't been confirmed yet. The laptop webcam (`-C
 Copy `.env.example` to `.env` and set:
 
 - `ELEVENLABS_API_KEY`: the user page then plays ElevenLabs audio, cached per phrase in `backend\data\tts_cache`, and falls back to browser speech on any error.
-- `GEMINI_API_KEY`: after dispatch, the responder page shows an AI summary built only from recorded facts. It is validated, and the deterministic facts are always shown beside it.
+- `GEMINI_API_KEY`: enables the optional incident briefing and the responder **Analytics → Generate summary** action. Analytics sends only server-computed aggregate counts and timings. Its model is independently configurable with `GEMINI_ANALYTICS_MODEL`.
 
-Both are optional: without keys the app starts and works fully. The keys stay on the server and are never logged or returned. Neither has been tested against the real services (no keys were available during development).
+Both are optional: without keys the app starts and works fully. The keys stay on the server and are never logged or returned. Aggregate Gemini analytics was verified with a synthetic live request on 2026-10-10; real incident briefing and ElevenLabs service success remain unverified.
+
+For key setup, restart commands, the analytics contract and verification details, see [docs/GEMINI_ANALYTICS.md](docs/GEMINI_ANALYTICS.md). Edit an existing `.env` rather than replacing it. New frontend source requires `start.ps1 -Rebuild` when an older build exists.
 
 ## Tests and checks
 

@@ -24,6 +24,9 @@ flowchart LR
     Snapshot -->|REST poll every 0.5 s| Sim[2D view / intended Unreal renderer]
     Services --> Facts[Incident facts / deterministic briefing]
     Facts -->|Optional text-only request| Gemini[Gemini summary]
+    DB --> Aggregate[Server-computed counts and timing samples]
+    Responder -->|Explicit Generate| Aggregate
+    Aggregate -->|Aggregate facts only| Gemini
     Voice[ElevenLabs optional voice] -->|Cached MP3 through backend| User
 ```
 
@@ -40,6 +43,7 @@ Backend owns decisions. Frontend countdowns and rendering are presentation. `/us
 | Object detection | `models/yolo26n.pt`; Ultralytics YOLO26n, CPU, inference size 640 | `vision/service.py`: filters classes by model names chair/person |
 | Hand gesture | `models/gesture_recognizer.task`; pretrained MediaPipe Tasks Gesture Recognizer | VIDEO mode, one hand; top gesture must be `Open_Palm` |
 | Optional briefing | Configurable `gemini-2.5-flash` default | `sponsors.py`: Gemini `generateContent`, JSON summary of textual incident facts |
+| Optional aggregate analytics | Configurable `gemini-3.8-flash` default via `GEMINI_ANALYTICS_MODEL` | `analytics.py`: qualitative Gemini commentary on server-computed counts and timing samples; same server API key |
 | Optional speech | Configurable `eleven_flash_v2_5`; voice `JBFqnCBsd6RMkjVDRZzb` | `sponsors.py`: ElevenLabs text-to-speech, MP3 44.1 kHz / 128 kbps |
 | Default speech | Browser `SpeechSynthesis` | `frontend/src/speech.ts`; OS/browser voice, no local custom voice model |
 
@@ -88,6 +92,7 @@ All paths below are relative to the repository. `GUIDEWING_DB_PATH` can override
 | Raw frame / detections / annotated preview | Vision thread memory | Newest-frame buffers; annotated MJPEG preview is **not blurred**; raw frames are not written by this code |
 | ElevenLabs phrase audio | `backend/data/tts_cache/<hash>.mp3` | SHA-256 of `voice_id|model_id|trimmed_text`, truncated to 32 hex characters; reusable across restart |
 | Gemini summary / pending/error status | `GeminiBriefing._results` in process RAM | Keyed by incident ID; lost on restart; no report/analytics table or durable AI-output store |
+| Aggregate Gemini jobs / summary text | `AnalyticsSummaries._jobs` in process RAM | SHA-256 of model/prompt version/selection/figures; 15-minute ready reuse, 30-second failure cooldown, maximum 64 jobs/two pending; lost on restart |
 | WebSocket event delivery | EventBus subscriptions in RAM | Boot ID, sequence, revision; per-subscriber queue limit 200; no replay log |
 | Last spoken text / dedupe keys | Browser localStorage | `guidewing.lastMessage`, `guidewing.spokenKeys` (last 200 keys); separate per browser origin/profile |
 | UI state and active retry key | React state/refs | Memory only; audio enablement needs a gesture after page load |
@@ -102,7 +107,7 @@ Snapshot capture runs asynchronously only for newly created non-TEST requests wi
 
 ## 5. Endpoints and their consumers
 
-Routes are registered in [main.py](../backend/app/main.py); Pydantic request/response shapes are in [schemas.py](../backend/app/schemas.py). JSON uses snake_case, UTC ISO timestamps with `Z`, and explicit nulls. Missing resources return 404; conflicts 409; validation errors generally 422. FastAPI also exposes `/docs`, `/redoc`, `/openapi.json` with its default configuration.
+Routes are registered in [main.py](../backend/app/main.py); lifecycle/snapshot Pydantic shapes are in [schemas.py](../backend/app/schemas.py), and analytics shapes in [analytics.py](../backend/app/analytics.py). JSON uses snake_case, UTC ISO timestamps with `Z`, and explicit nulls. Missing resources return 404; conflicts 409; validation errors generally 422. FastAPI also exposes `/docs`, `/redoc`, `/openapi.json` with its default configuration.
 
 | Method and path | Purpose |
 |---|---|
@@ -117,6 +122,9 @@ Routes are registered in [main.py](../backend/app/main.py); Pydantic request/res
 | POST `/api/incidents/{id}/{cancel,accept,resolve}` | Lifecycle commands; optional `{responder}` on acceptance |
 | GET `/api/incidents/{id}/snapshot` | Persisted blurred JPEG, or 404; no-store header |
 | GET `/api/incidents/{id}/briefing` | Deterministic briefing plus optional Gemini summary/status; triggers async generation when eligible |
+| GET `/api/analytics/config` | Safe configuration/model metadata, no external generation or key exposure |
+| POST `/api/analytics/summary` | `{range: day\|week\|loaded, include_tests: boolean}`; server filters latest 500 incidents and explicitly starts/joins cached aggregate summary |
+| GET `/api/analytics/summary/{job_id}` | Read cached job/snapshot only; 404 after restart/eviction; never regenerates |
 | GET `/api/speech?text=...` | Cached/generated ElevenLabs MP3 for text up to 300 chars; 404 unconfigured, 502 provider failure |
 | GET `/api/simulation/state?journey_id=...` | Combined journey/open/latest incident/vision snapshot for browser and intended Unreal; current alias or mock scenario |
 | GET `/api/simulation/route` | Route ID/duration, waypoints and normalized progress marks for renderer |
@@ -133,23 +141,27 @@ Developer API routes are conditional on `GUIDEWING_DEV_CONTROLS` (default true).
 
 ## 6. Frontend updates, speech, and Unreal boundary
 
-`frontend/src/api.ts` wraps fetch and mirrors backend types. React pages use local state/hooks, not a separate global store or client database. `main.tsx` selects pages by pathname; no router package is installed.
+`frontend/src/api.ts` wraps fetch with an eight-second timeout and mirrors backend types. React pages use local state/hooks, not a separate global store or client database. `main.tsx` selects pages by pathname; both `/` and `/user` open the companion. Home/Settings use hash navigation while retaining the mounted controls; starting a new journey waits for any current help request to close; no router package is installed. The charcoal/mint theme, original SVG drone entrance, static reduced-motion loading, and persistent assistance bar are in `ui.tsx`, `styles.css`, and `UserPage.tsx`. Read [FRONTEND.md](FRONTEND.md) for setup, implementation boundaries, and fresh validation evidence.
 
-`events.ts` reconnects WebSockets with increasing delay up to 2.5 seconds. Reconnect/new boot/sequence gaps request REST state again; missed events are not replayed from disk. One REST poll per hook may be in flight. Current page polling: user snapshot every 1 second plus vision every 2 seconds; responder list every 2 seconds with event-triggered refresh; 2D snapshot every 0.5 seconds; dev vision every 1 second and journey every 2 seconds. A pending AI summary is rechecked by the responder card up to 15 times at two-second intervals.
+`events.ts` reconnects WebSockets with increasing delay up to 2.5 seconds. Reconnect/new boot/sequence gaps request REST state again; missed events are not replayed from disk. One REST poll per hook may be in flight. Current page polling: user snapshot every 1 second plus vision every 2 seconds; responder latest-500 list every 2 seconds with event-triggered refresh and selected incident detail every 3 seconds; 2D snapshot every 0.5 seconds; dev vision every 1 second and journey every 2 seconds. A pending incident AI briefing is rechecked up to 15 times at two-second intervals after the user chooses View incident briefing. Analytics displays deterministic client aggregates; explicit Generate asks the backend to recompute a server-clock snapshot. Its pending job is read once a second for up to 45 seconds, with explicit status recovery after transport failure. Filters/navigation/refresh never trigger aggregate Gemini generation.
 
 The snapshot supplies schema version, data source, boot ID, revision, server sample time, journey, active incident, last incident, and vision. Boot/revision are process-local; reset revision tracking on a new boot. Cancelled/resolved incidents move out of `active_incident` and remain in `last_incident`. Mock snapshots have fixed scenarios and labels, not an advancing live journey.
 
 `SimPage` projects route waypoints into SVG and adds at most half a second of visual extrapolation while active. It never writes progress. Reduced motion removes extrapolation; it displays errors/staleness. Intended Unreal polls every 0.5 seconds and follows a local spline, freezes on disconnection, and applies boot/revision rules. See [UNREAL_INTEGRATION.md](UNREAL_INTEGRATION.md): older starter `JourneyId=demo` gets 404; `current` returns a real UUID and fails the starter's strict identity check without the documented fix. Do not assume that starter is installed in the scene.
 
-`speech.ts` deduplicates incident status and obstruction announcements; first-load current state is seeded to avoid replaying an old acceptance. Repeat deliberately reuses the last message. Speech needs a click/keypress; countdown seconds are visual, not spoken each second. Newest meaningful speech replaces older audio. Optional server speech fetch has a three-second browser timeout; backend synthesis timeout is eight seconds, so first uncached audio can fall back while the backend later fills its cache.
+`speech.ts` deduplicates incident status and obstruction announcements; first-load current state is seeded to avoid replaying an old acceptance. Repeat deliberately reuses the latest visible message. Settings offers app voice, screen-reader live announcements, or text only; app voice and the live region are not active together. Single-key shortcuts can be disabled. Speech needs a click/keypress; countdown seconds are visual, not spoken each second. Newest meaningful speech replaces older audio. Optional server speech fetch has a three-second browser timeout; backend synthesis timeout is eight seconds, so first uncached audio can fall back while the backend later fills its cache.
 
 ## 7. Optional providers: important implementation limits
 
-ElevenLabs receives text and selected model/voice, not camera footage. Gemini receives textual request/source/status, location/coordinates, timeline event types/times, and a boolean snapshot-attached flag. The image itself is not sent to Gemini. Keys remain server-side.
+ElevenLabs receives text and selected model/voice, not camera footage. The **incident briefing** Gemini adapter receives textual request/source/status, location/coordinates, timeline event types/times, and a boolean snapshot-attached flag. The image itself is not sent to Gemini. The separate **analytics** Gemini adapter receives only approved range/TEST inclusion/record limit/counts/timing averages/sample sizes. It sends no identities, raw incident records, locations or images. Keys remain server-side.
 
 Gemini is requested **on reading the briefing endpoint**, for dispatched/acknowledged/resolved incidents. It is not automatically called by the dispatch transition alone. `request_async` starts one request per incident ID and retains ready/failed/rejected status in memory. It does not regenerate on later acceptance, resolution, or snapshot attachment and has no version-based refresh or automatic retry. This is the main gap between the implemented briefing and planned completed-response reporting.
 
 Generation asks for structured JSON and low temperature. Validation rejects missing/long summaries, some crime/navigation/dispatch language, omission of the simulated label, and numeric tokens absent from recorded facts. These checks reduce unsupported output; they do not prove semantic accuracy. Deterministic facts stay available. Provider generation is outside lifecycle-critical commands, so help/cancel/accept do not depend on AI success.
+
+Aggregate generation is implemented separately in `analytics.py` and `AnalyticsSummary.tsx`. The POST accepts only selection flags, uses the normal incident list (which still settles overdue deadlines), filters creation times with backend UTC, and computes current-status counts plus dispatch-to-acceptance/acceptance-to-resolution means and qualifying sample counts. It rejects future/invalid creation dates and invalid/reversed timing pairs; missing averages are null. The UI's deterministic figures use browser time, so a clock/range-boundary difference can produce a changed-snapshot warning.
+
+Analytics summaries are short qualitative text with no numerals; output is checked for length, simulated labeling and restricted instruction language. The hash cache excludes moving timestamps and preserves the original as-of snapshot. Ready results reuse for 15 minutes, failures/rejections for 30 seconds, with two pending jobs and 64 cached jobs maximum. GET status reads an existing job only. Missing key/empty data make no external call; failures leave ordinary metrics usable. No durable report/export table was added. See [GEMINI_ANALYTICS.md](GEMINI_ANALYTICS.md) for exact contracts and key setup. All provider validation is partial, not proof of factual correctness.
 
 ## 8. File layout and change map
 
@@ -167,15 +179,21 @@ backend/app/
   snapshot.py      blur-before-write JPEG
   providers.py     deterministic briefing / interface
   sponsors.py      ElevenLabs/Gemini adapters
+  analytics.py     aggregate facts, Gemini summary provider/jobs, analytics wire types
   vision/{camera,service,logic}.py     camera, inference, temporal rules
-backend/tests/     lifecycle, simulation, vision rules, sponsor stubs
+backend/tests/     lifecycle, simulation, vision rules, sponsor/analytics stubs
 frontend/src/
   main.tsx         pathname page selection
-  api.ts           typed HTTP calls
+  api.ts           typed HTTP calls, timeouts and LAN-safe request keys
   events.ts        polling / WS reconnection
   speech.ts        browser/server audio, dedupe, Repeat
+  ui.tsx           brand, original SVG flyby, initialization and mist artwork
+  analytics.tsx    deterministic dashboard and selection controls
+  analyticsMetrics.ts   pure range/status/duration computations and snapshot comparison
+  AnalyticsSummary.tsx  explicit Gemini generation/status/recovery UI
   components.tsx + styles.css          status/copy controls and presentation
   pages/{UserPage,ResponderPage,SimPage,DevPage}.tsx
+frontend/tests/    Node tests for analytics ranges and timestamp handling
 scripts/           setup/start/stop/build; checks; model download; fixtures
 docs/              contract, integration, test/progress records, demo plans
 models/            downloaded weights
@@ -193,14 +211,15 @@ Tests use `FakeClock`, temporary SQLite, and disabled camera by default; they do
 
 | Status | Features |
 |---|---|
-| Implemented in source | Existing React user/responder/2D/dev frontend; journey progression; chair-region warning; palm/button help; cancel window; dispatch/accept/resolve; request/location/timeline persistence; blurred snapshots; speech/dedupe/Repeat; restart recovery; current alias; test/mock fixtures |
-| Implemented, real-service success unverified in repo records | Optional ElevenLabs audio/cache and Gemini request briefing with fallbacks |
+| Implemented in source | Polished React companion Home/Settings, persistent assistance controls, responder queue/detail/history and deterministic analytics; existing 2D/dev frontend; journey progression; chair-region warning; palm/button help; cancel window; dispatch/accept/resolve; request/location/timeline persistence; blurred snapshots; speech/dedupe/Repeat; restart recovery; current alias; test/mock fixtures |
+| Implemented, real-service success unverified in repo records | Optional ElevenLabs audio/cache and Gemini request briefing with deterministic fallbacks |
+| Implemented, live provider check passed | Explicit aggregate Gemini analytics summary; synthetic `gemini-3.8-flash` call returned accepted output after MIME enum correction on 2026-10-10 |
 | Latest user-observed PASS recorded 2026-10-10 | Main DroidCam USB index 1 chair/palm/help sequence, speech, shortcuts, acceptance, resolution, new journey; venue setup still needs rehearsal |
-| Planned in conversation | Finished frontend replacing prototype presentation; Gemini completed-response reports/analytics; recorded Unreal clip on phone as fallback; proposed Unreal voice playback |
+| Planned in conversation | Durable completed-response reports; recorded Unreal clip on phone as fallback; proposed Unreal voice playback |
 | Integration/evaluation pending | Connected/packaged Unreal, LAN setup, full keyboard focus order, screen-reader/reduced-motion manual checks, blind/low-vision participant evaluation |
 | Excluded from current implementation | Physical drone/flight control, autonomous safe navigation, actual emergency service/SMS/calls, automatic GPS capture, crime/fall recognition, voice cancellation, accounts/auth |
 
-For completed-response reports, add explicit final-state generation/storage and refresh rules; the cached first briefing does not include later events. For analytics, derive counts/durations deterministically from incident rows and timestamps, then let Gemini summarize those values. No report endpoint/table/export/analytics dashboard currently exists. Durable records already provide a useful foundation, but conversation plans and presentation scripts are not proof of implementation.
+For completed-response reports, add explicit final-state generation/storage and refresh rules; the cached first briefing does not include later events. The `/responder` analytics dashboard includes explicit Gemini summaries of deterministic server-computed aggregates, with latest-500/creation-range limits and RAM caching. Durable completed-response reports, a report table and exports remain unimplemented. On 2026-10-10, the initial 78 backend cases, five Node cases, strict TypeScript/build and 27 browser checks passed using synthetic records and stubbed Gemini HTTP. A subsequent live diagnostic found the JSON-format MIME enum must be `APPLICATION_JSON`; with that correction the configured provider returned an accepted synthetic summary. All 80 backend cases pass after adding the format regression and HTTP 400/401 cases. Keys and actual incident records were not printed or sent in this diagnostic. Conversation plans and scripts are not proof of Unreal integration or general model quality.
 
 ## 10. Maintaining this reference cheaply
 

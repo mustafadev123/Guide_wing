@@ -4,8 +4,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, describeLocation, RouteInfo, SimulationState } from "../api";
-import { usePolling } from "../events";
+import { useFreshness, usePolling } from "../events";
 import { CopyableId, ModeBadge } from "../components";
+import { ViewHeader } from "../ui";
 
 const W = 640;
 const H = 360;
@@ -83,13 +84,13 @@ export function SimPage() {
     return () => cancelAnimationFrame(raf);
   }, [reduced]);
 
-  const stale = snap.lastOk !== null && Date.now() - snap.lastOk > 3000;
+  const stale = useFreshness(snap.lastOk, 3000);
   const points = route ? project(route) : [];
   const pos = points.length ? pointAt(points, shown) : null;
   const inc = s?.active_incident;
 
   return (
-    <main className="page sim">
+    <><ViewHeader current="sim" /><main className="page sim">
       <header className="topbar">
         <h1>GuideWing <span className="sub">2D fallback view</span></h1>
         {s && <ModeBadge mode={s.vision.input_mode} ready={s.vision.ready} />}
@@ -98,7 +99,7 @@ export function SimPage() {
         Simulated journey — fallback renderer. Unreal is the primary renderer; both read the same backend state.
         Positions are configured demo waypoints, not real GPS.
       </p>
-      {(snap.error || stale) && (
+      {(snap.error || (stale && s)) && (
         <p className="error" role="alert">Disconnected from the backend — the scene is stopped until fresh state arrives.</p>
       )}
       <div className="sim-wrap">
@@ -145,6 +146,6 @@ export function SimPage() {
         value={s && s.data_source === "live" ? s.journey.id : null}
         hint="This view follows journey_id=current. Reset demo on /dev creates a new UUID."
       />
-    </main>
+    </main></>
   );
 }

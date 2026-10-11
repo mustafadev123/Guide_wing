@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from .clock import SystemClock, utc_iso
+from .analytics import AnalyticsSummaries, GeminiAnalytics, SummaryRequest, SummaryResult
 from .config import Settings, load_settings
 from .db import Database
 from .events import EventBus
@@ -59,6 +60,10 @@ class Services:
             if settings.elevenlabs_api_key else None
         )
         self.ai_briefing = GeminiBriefing(settings.gemini_api_key, settings.gemini_model) if settings.gemini_api_key else None
+        self.analytics = AnalyticsSummaries(
+            lambda: self.incidents.list(limit=500), clock,
+            GeminiAnalytics(settings.gemini_api_key, settings.gemini_analytics_model) if settings.gemini_api_key else None,
+        )
         self._ticker_stop = threading.Event()
         self._ticker: threading.Thread | None = None
         # Startup recovery: overdue pending requests are dispatched now (cancelled stay cancelled).
@@ -295,6 +300,21 @@ def create_app(settings: Settings | None = None, clock=None, start_background: b
         if audio is None:
             return JSONResponse({"detail": "speech provider failed; use browser speech"}, status_code=502)
         return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "max-age=86400"})
+
+    # ---- explicit aggregate analytics summaries ---------------------------
+
+    @app.get("/api/analytics/config")
+    def analytics_configuration():
+        return svc.analytics.configuration()
+
+    @app.post("/api/analytics/summary", response_model=SummaryResult)
+    def analytics_summary(body: SummaryRequest):
+        return svc.analytics.request(body)
+
+    @app.get("/api/analytics/summary/{job_id}", response_model=SummaryResult)
+    def analytics_summary_status(job_id: str):
+        # Reads a job only; polling never triggers a provider request.
+        return svc.analytics.get(job_id)
 
     # ---- simulation snapshot (Unreal + 2D fallback) -------------------------
 

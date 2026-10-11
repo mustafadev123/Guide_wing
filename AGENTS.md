@@ -4,13 +4,13 @@ Start here for architecture/status questions. Detailed implementation notes: [do
 
 ## Fast orientation
 
-- Python FastAPI/Uvicorn backend; React/TypeScript/Vite frontend. Built web pages and API share port 8000. Source frontend already works; the team's upcoming finished UI is a planned replacement.
+- Python FastAPI/Uvicorn backend; React/TypeScript/Vite frontend. Built web pages and API share port 8000. The polished companion, responder desk, and deterministic analytics are implemented; see docs/FRONTEND.md.
 - Backend owns journey progression, incident states, cancellation deadlines, dispatch, and location. Browsers render state; `/user` owns speech. Unreal lives in sibling `../GuideWingSim`; backend integration/packaged build remain unverified.
 - Entry/routes: `backend/app/main.py`; lifecycle: `services.py`; SQLite schema: `db.py`; wire types: `schemas.py`; defaults: `config.py`.
 - Vision: `vision/service.py`, `vision/logic.py`, `vision/camera.py`. CPU YOLO26n chairs/person overlays; MediaPipe Open_Palm. Two-second palm hold; one-second chair persistence; request has a ten-second cancellation window.
 - Durable data: `backend/data/guidewing.sqlite3`, `snapshots/<incident UUID>.jpg`, `tts_cache/<phrase hash>.mp3`. Raw camera frames stay in memory. Annotated live preview is not blurred. Gemini results and WebSocket events are memory-only.
-- Optional providers: `sponsors.py`; deterministic fallback: `providers.py`; browser speech: `frontend/src/speech.ts`. Gemini default `gemini-2.5-flash`, ElevenLabs `eleven_flash_v2_5`; configurable, actual provider success requires rehearsal evidence.
-- Implemented: journey, help/cancel/dispatch/accept/resolve, responder history, camera/replay, speech/repeat, 2D renderer, mock/test controls, provider adapters. Planned: finished frontend, completed-response Gemini reports/analytics, audio playback within Unreal. No real flight, emergency calls, safe routing, or implemented browser GPS acquisition.
+- Optional providers: `sponsors.py` for incident briefings/speech, `analytics.py` for aggregate Gemini summaries; deterministic fallback: `providers.py`; browser speech: `frontend/src/speech.ts`. Incident Gemini default `gemini-2.5-flash`; aggregate Gemini default `gemini-3.8-flash` via `GEMINI_ANALYTICS_MODEL`, using the same server `GEMINI_API_KEY`. ElevenLabs default `eleven_flash_v2_5`; actual provider success requires rehearsal evidence.
+- Implemented: journey, help/cancel/dispatch/accept/resolve, responder history, camera/replay, speech/repeat, 2D renderer, mock/test controls, provider adapters. Frontend: Home/Settings, persistent Help/Cancel/Repeat, backend-owned countdown and journeys, incident detail/history, deterministic analytics from latest 500 records and explicit Gemini aggregate summaries. Backend recomputes selected aggregates; AI jobs/cache are RAM-only (15 minutes, failure cooldown 30 seconds), no raw incidents sent in this summary path. See docs/GEMINI_ANALYTICS.md for setup/contracts/tests. Planned: durable completed-response reports, audio playback within Unreal. No real flight, emergency calls, safe routing, or implemented browser GPS acquisition.
 
 ## Reduce repeated lookups
 

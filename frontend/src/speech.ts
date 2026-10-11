@@ -13,7 +13,7 @@ export interface SpeechProvider {
 export class BrowserSpeechProvider implements SpeechProvider {
   readonly name = "browser";
   available() {
-    return typeof window !== "undefined" && "speechSynthesis" in window;
+    return typeof window !== "undefined" && typeof window.speechSynthesis?.speak === "function";
   }
   speak(text: string) {
     if (!this.available()) return;
@@ -36,6 +36,8 @@ export class ServerThenBrowserSpeech implements SpeechProvider {
   private useServer = false;
   private audio: HTMLAudioElement | null = null;
   private token = 0;
+  private request: AbortController | null = null;
+  private objectUrl: string | null = null;
   constructor(private fallback: SpeechProvider = new BrowserSpeechProvider()) {
     fetch("/api/health")
       .then((r) => r.json())
@@ -52,7 +54,12 @@ export class ServerThenBrowserSpeech implements SpeechProvider {
   }
   stop() {
     this.token++;
+    this.request?.abort();
+    this.request = null;
     this.audio?.pause();
+    this.audio = null;
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = null;
     this.fallback.stop();
   }
   speak(text: string) {
@@ -60,12 +67,14 @@ export class ServerThenBrowserSpeech implements SpeechProvider {
     const token = this.token;
     if (!this.useServer) return this.fallback.speak(text);
     const ctrl = new AbortController();
+    this.request = ctrl;
     const timer = window.setTimeout(() => ctrl.abort(), 3000);
     fetch(`/api/speech?text=${encodeURIComponent(text)}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`speech ${r.status}`))))
       .then((blob) => {
         if (token !== this.token) return; // a newer message replaced this one
-        this.audio = new Audio(URL.createObjectURL(blob));
+        this.objectUrl = URL.createObjectURL(blob);
+        this.audio = new Audio(this.objectUrl);
         return this.audio.play();
       })
       .catch(() => {
@@ -84,7 +93,8 @@ export class Announcer {
   lastMessage: string | null;
 
   constructor(private provider: SpeechProvider, private onText: (text: string) => void) {
-    this.spoken = readJson<string[]>(SPOKEN_KEY, []);
+    const keys = readJson<unknown>(SPOKEN_KEY, []);
+    this.spoken = Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [];
     this.lastMessage = safeGet(LAST_KEY);
   }
 
@@ -100,6 +110,8 @@ export class Announcer {
   enable() {
     this.enabled = true;
   }
+
+  stop() { this.enabled = false; this.provider.stop(); }
 
   /** Mark a key as already handled without speaking (initial load / reconnect). */
   seed(key: string) {

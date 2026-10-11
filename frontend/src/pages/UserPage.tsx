@@ -1,379 +1,232 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  api, ApiError, describeLocation, IncidentStatus, MODE_LABEL, newRequestKey, RequestSource,
-  SimulationState, SnapshotIncident, VisionStatus,
-} from "../api";
-import { ServerEvent, usePolling, useServerEvents } from "../events";
+import { api, ApiError, describeLocation, IncidentStatus, MODE_LABEL, newRequestKey, SimulationState, SnapshotIncident, VisionStatus } from "../api";
+import { ServerEvent, useFreshness, usePolling, useServerEvents } from "../events";
 import { Announcer, ServerThenBrowserSpeech } from "../speech";
 import { ConnectionBadge, ModeBadge } from "../components";
+import { Atmosphere, Entrance, Icon } from "../ui";
 
-const TERMINAL: IncidentStatus[] = ["cancelled", "resolved"];
-
-function incidentMessage(inc: SnapshotIncident, previous: IncidentStatus | undefined): string {
+const STATUS_TEXT: Record<IncidentStatus, string> = { pending: "Cancellation window", dispatched: "Waiting for a responder", acknowledged: "Accepted by a responder", cancelled: "Canceled", resolved: "Resolved" };
+function incidentMessage(inc: Pick<SnapshotIncident, "status" | "request_source">): string {
+  const test = inc.request_source === "test" ? "Test request. " : "";
   switch (inc.status) {
-    case "pending": {
-      const lead: Record<RequestSource, string> = {
-        gesture: "Open palm recognized. ",
-        button: "",
-        test: "Test request. ",
-      };
-      return `${lead[inc.request_source]}Help request starting. It will be sent in 10 seconds unless you cancel.`;
-    }
-    case "dispatched":
-      return "Help request sent to the responder. Waiting for acceptance.";
-    case "acknowledged":
-      return "A responder accepted your request.";
-    case "cancelled":
-      return previous === "dispatched" || previous === "acknowledged"
-        ? "Help request cancelled. The responder was notified."
-        : "Help request cancelled. Nothing was sent.";
-    case "resolved":
-      return "The responder marked your request as resolved.";
+    case "pending": return `${test}${inc.request_source === "gesture" ? "Open palm recognized. " : ""}Help request recorded. You have 10 seconds to cancel before simulated dispatch.`;
+    case "dispatched": return `${test}Your request reached the simulated responder queue. Waiting for acceptance.`;
+    case "acknowledged": return `${test}A responder accepted your request.`;
+    case "cancelled": return `${test}The server confirmed your help request is canceled.`;
+    case "resolved": return `${test}The responder marked your request as resolved.`;
   }
 }
-
-const STATUS_TEXT: Record<IncidentStatus, string> = {
-  pending: "Starting — you can still cancel",
-  dispatched: "Sent — waiting for a responder",
-  acknowledged: "Accepted by a responder",
-  cancelled: "Cancelled",
-  resolved: "Resolved",
-};
+type Feedback = "voice" | "screen-reader" | "text";
+type Attempt = { journeyId: string; key: string };
+function readStored<T>(key: string, fallback: T): T {
+  try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
+}
+function store(key: string, value: unknown) {
+  try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* memory state still works */ }
+}
 
 export function UserPage() {
-  const [message, setMessage] = useState<string>("");
+  const [message, setMessage] = useState("Connecting to your journey. No real emergency service is contacted.");
   const announcer = useMemo(() => new Announcer(new ServerThenBrowserSpeech(), setMessage), []);
+  const [feedback, setFeedback] = useState<Feedback>(() => {
+    const stored = readStored<Feedback>("guidewing.feedback", "voice");
+    return ["voice", "screen-reader", "text"].includes(stored) ? stored : "voice";
+  });
   const [audioOn, setAudioOn] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [shortcutsOn, setShortcutsOn] = useState(() => readStored("guidewing.shortcuts", true));
+  const [view, setView] = useState(location.hash === "#settings" ? "settings" : "home");
+  const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [repeatCount, setRepeatCount] = useState(0);
+  const [speechNotice, setSpeechNotice] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const offsetRef = useRef(0);
+  const offset = useRef(0);
   const seeded = useRef(false);
-  const lastIncidentStatus = useRef<Map<string, IncidentStatus>>(new Map());
-  const helpKey = useRef<string | null>(null);
-
+  const lock = useRef(false);
+  const submitted = useRef<string | null>(null);
+  const cancellationToConfirm = useRef<string | null>(null);
+  const hadConnection = useRef(false);
+  const wasReady = useRef(false);
+  const attempt = useRef<Attempt | null>(readStored<Attempt | null>("guidewing.helpAttempt", null));
   const snap = usePolling<SimulationState>(async () => {
     const s = await api.snapshot();
-    offsetRef.current = Date.parse(s.sampled_at) - Date.now();
+    offset.current = Date.parse(s.sampled_at) - Date.now();
     return s;
   }, 1000);
   const vision = usePolling<VisionStatus>(api.vision, 2000);
+  const stale = useFreshness(snap.lastOk);
   const state = snap.data;
+  const journey = state?.journey;
+  const active = state?.active_incident ?? null;
+  const ready = !!state && !snap.error && !stale;
+  const v = vision.data;
+  const pending = active?.status === "pending" ? active : null;
+  useEffect(() => { document.getElementById("main-content")?.scrollTo({ top: 0 }); }, [view]);
 
-  const onEvent = useCallback(
-    (e: ServerEvent) => {
-      if (e.type === "vision.obstacle" && e.payload.announce) {
-        const paused = e.payload.journey_paused ? " Journey paused. Press Resume when ready." : "";
-        const test = e.payload.source === "test" ? "Test. " : "";
-        announcer.announce(`obstacle:${e.payload.observation_id}`, `${test}Caution: obstruction detected in the path ahead.${paused}`);
-      }
-      if (e.type.startsWith("incident.") || e.type.startsWith("journey.")) snap.refresh();
-      if (e.type === "vision.status") vision.refresh();
-    },
-    [announcer, snap.refresh, vision.refresh],
-  );
-  const connection = useServerEvents(onEvent, snap.refresh);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const change = () => setView(location.hash === "#settings" ? "settings" : "home");
+    const clock = () => setNow(Date.now());
+    window.addEventListener("hashchange", change);
+    document.addEventListener("visibilitychange", clock);
+    return () => { clearInterval(timer); window.removeEventListener("hashchange", change); document.removeEventListener("visibilitychange", clock); announcer.stop(); };
+  }, [announcer]);
+  const onEvent = useCallback((e: ServerEvent) => {
+    if (e.type === "vision.obstacle" && e.payload.announce) {
+      announcer.announce(`obstacle:${e.payload.observation_id}`, `${e.payload.source === "test" ? "Test. " : ""}Caution: obstruction detected in the monitored region.${e.payload.journey_paused ? " Journey paused. Resume when ready." : ""}`);
+    }
+    if (e.type.startsWith("incident.") || e.type.startsWith("journey.")) void snap.refresh();
+    if (e.type.startsWith("vision.")) void vision.refresh();
+  }, [announcer, snap.refresh, vision.refresh]);
+  const connection = useServerEvents(onEvent, () => { void snap.refresh(); void vision.refresh(); });
 
-  // Announce meaningful transitions once; the first snapshot after load only seeds.
+  useEffect(() => {
+    if (hadConnection.current && wasReady.current && !ready) announcer.say("Connection unavailable. Requests and cancellations need server confirmation. Reconnect to check the current status.");
+    if (hadConnection.current && !wasReady.current && ready) announcer.say(`Connection restored. ${active ? `Request status: ${STATUS_TEXT[active.status].toLowerCase()}.` : "No active help request."}`);
+    if (ready) hadConnection.current = true;
+    wasReady.current = ready;
+  }, [ready, active, announcer]);
+
   useEffect(() => {
     if (!state) return;
     const j = state.journey;
     const inc = state.last_incident;
-    const journeyKey = `journey:${j.id}:${j.version}`;
+    if (inc?.id === cancellationToConfirm.current && inc.status === "cancelled") {
+      cancellationToConfirm.current = null; setActionError(null);
+    }
+    const jKey = `journey:${j.id}:${j.version}`;
+    if (submitted.current && (inc?.id === submitted.current || state.active_incident?.id === submitted.current)) submitted.current = null;
+    if (attempt.current && (attempt.current.journeyId !== j.id || state.active_incident)) {
+      if (state.active_incident) setActionError(null);
+      attempt.current = null; store("guidewing.helpAttempt", null);
+    }
     if (!seeded.current) {
       seeded.current = true;
-      announcer.seed(journeyKey);
-      if (inc) {
-        announcer.seed(`incident:${inc.id}:${inc.status}`);
-        lastIncidentStatus.current.set(inc.id, inc.status);
-      }
+      announcer.seed(jKey);
+      if (inc) announcer.seed(`incident:${inc.id}:${inc.status}`);
+      // Restore status as text; refresh never submits or replays an old request.
+      const restored = state.active_incident;
+      announcer.say(restored ? `Existing request: ${STATUS_TEXT[restored.status].toLowerCase()}. No new request was sent on this page load.` : j.status === "idle" ? "Ready when you are. Start a journey to enable Help." : `Journey ${j.status}. ${inc ? `Last request: ${STATUS_TEXT[inc.status].toLowerCase()}.` : "No active help request."}`);
       return;
     }
-    if (inc) {
-      const prev = lastIncidentStatus.current.get(inc.id);
-      if (prev !== inc.status) {
-        announcer.announce(`incident:${inc.id}:${inc.status}`, incidentMessage(inc, prev));
-        lastIncidentStatus.current.set(inc.id, inc.status);
-      }
-    }
-    if (j.pause_reason === "help_request" || j.pause_reason === "obstruction") {
-      announcer.seed(journeyKey); // covered by the incident/obstacle message
-    } else if (j.status === "active") {
-      announcer.announce(journeyKey, j.route_progress > 0.001 ? "Journey resumed." : "Journey started. To request help, hold up an open palm for two seconds or press Help.");
-    } else if (j.status === "paused") {
-      announcer.announce(journeyKey, "Journey paused.");
-    } else if (j.status === "ended") {
-      announcer.announce(journeyKey, j.route_progress >= 1 ? "You have reached the end of the demo route." : "Journey ended.");
-    }
+    if (inc) announcer.announce(`incident:${inc.id}:${inc.status}`, incidentMessage(inc));
+    if (j.pause_reason === "help_request" || j.pause_reason === "obstruction") announcer.seed(jKey);
+    else if (j.status === "active") announcer.announce(jKey, j.route_progress > 0.001 ? "Journey resumed." : "Journey started. Press Help, or hold an open palm for two seconds when camera recognition is ready.");
+    else if (j.status === "paused") announcer.announce(jKey, "Journey paused. Your help request is unchanged.");
+    else if (j.status === "ended") announcer.announce(jKey, j.route_progress >= 1 ? "You reached the end of the demo route." : "Journey ended.");
   }, [state, announcer]);
 
-  // Visual countdown only (not announced every second).
-  const pending = state?.active_incident?.status === "pending" ? state.active_incident : null;
-  useEffect(() => {
-    if (!pending) return;
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, [pending]);
-  const secondsLeft = pending
-    ? Math.max(0, Math.ceil((Date.parse(pending.dispatch_at) - (now + offsetRef.current)) / 1000))
-    : null;
-
-  const enableAudio = () => {
-    announcer.enable();
-    setAudioOn(true);
+  const enableAudio = () => { if (feedback === "voice") { announcer.enable(); setAudioOn(true); } };
+  const explain = (text: string) => { enableAudio(); announcer.say(text); };
+  const canHelp = ready && !!journey?.armed && !active && !submitted.current && !busy;
+  const canCancel = ready && !!active && ["pending", "dispatched"].includes(active.status) && !busy;
+  const helpBlocked = busy ? "Waiting for server confirmation." : !ready ? "Reconnect to the server before requesting help." : !journey?.armed ? journey?.status === "ended" ? "Start a new journey to request help." : "Start your journey to enable Help." : active ? "A help request is already active." : submitted.current ? "Your request is being synchronized." : null;
+  const cancelBlocked = busy === "cancel" ? "Cancellation requested. Waiting for server confirmation." : busy ? "Waiting for the current action to finish." : !ready ? "Reconnect to confirm cancellation." : active?.status === "acknowledged" ? "Already accepted. Only the responder can now resolve this request." : !canCancel ? "No request to cancel." : null;
+  const run = async (kind: string, fn: () => Promise<unknown>) => {
+    if (lock.current || !ready) return;
+    lock.current = true; setBusy(kind); setActionError(null); enableAudio();
+    try { await fn(); await snap.refresh(); }
+    catch (e) {
+      const msg = e instanceof ApiError && e.status < 500 ? e.message : "Server confirmation unavailable. The action may have reached the server. Reconnect and check the current status before trying again.";
+      setActionError(msg); announcer.say(msg); void snap.refresh();
+    } finally { lock.current = false; setBusy(null); }
   };
-
-  const run = async (fn: () => Promise<unknown>) => {
-    enableAudio(); // every control is a user gesture
-    setBusy(true);
-    setActionError(null);
-    try {
-      await fn();
-      await snap.refresh();
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "Cannot reach the GuideWing server.";
-      setActionError(msg);
-      announcer.say(msg);
-    } finally {
-      setBusy(false);
-    }
+  const start = () => journey && run("journey", () => api.journeyAction(journey.id, "start"));
+  const startNew = () => {
+    if (active) { explain("Cancel or resolve the active help request before starting a new journey."); return; }
+    return run("journey", async () => { const fresh = await api.createJourney(); await api.journeyAction(fresh.id, "start"); });
   };
-
-  const journey = state?.journey;
-  const active = state?.active_incident ?? null;
-  const canHelp = !!journey && journey.armed && !active;
-  const canCancel = !!active && (active.status === "pending" || active.status === "dispatched");
-  // Why Help/Cancel are unavailable right now (spoken when pressed; shown under the buttons).
-  const helpBlocked = canHelp
-    ? null
-    : !journey || journey.status === "idle"
-      ? "Start the journey first, then you can request help."
-      : journey.status === "ended"
-        ? "This journey has ended. Start a new journey to request help."
-        : active?.status === "acknowledged"
-          ? "A responder has already accepted your request. A new request becomes possible after the responder marks it resolved."
-          : "A help request is already active. Use Cancel if you no longer need help.";
-  const cancelBlocked = canCancel
-    ? null
-    : active?.status === "acknowledged"
-      ? "This request was already accepted by a responder, so it can no longer be cancelled here. The responder will mark it resolved."
-      : "There is no help request to cancel.";
-  const explain = (text: string | null) => {
-    enableAudio();
-    if (text) announcer.say(text);
-  };
-
-  const start = () => journey && run(() => api.journeyAction(journey.id, "start"));
-  // A finished journey cannot be resumed; start a fresh one (backend ends the old one).
-  const startNew = () =>
-    run(async () => {
-      const fresh = await api.createJourney();
-      await api.journeyAction(fresh.id, "start");
-    });
-  const endedMessage = () => {
-    enableAudio();
-    announcer.say("This journey has ended. Press Start a new journey to begin again.");
-  };
-  const togglePause = () =>
-    journey && run(() => api.journeyAction(journey.id, journey.status === "paused" ? "resume" : "pause"));
-  const help = () =>
-    journey &&
-    run(async () => {
-      helpKey.current ??= newRequestKey("button"); // retried with the same key after a network error
+  const togglePause = () => journey && run("journey", () => api.journeyAction(journey.id, journey.status === "paused" ? "resume" : "pause"));
+  const help = () => {
+    if (!canHelp || !journey) { if (!lock.current) explain(helpBlocked ?? "A help request is already active."); return; }
+    void run("help", async () => {
+      if (attempt.current?.journeyId !== journey.id) attempt.current = { journeyId: journey.id, key: newRequestKey("button") };
+      store("guidewing.helpAttempt", attempt.current);
       try {
-        await api.requestHelp(journey.id, helpKey.current);
-        helpKey.current = null;
+        const result = await api.requestHelp(journey.id, attempt.current!.key);
+        submitted.current = result.incident.id;
+        attempt.current = null; store("guidewing.helpAttempt", null);
+        announcer.announce(`incident:${result.incident.id}:${result.incident.status}`, incidentMessage(result.incident));
       } catch (e) {
-        if (e instanceof ApiError) helpKey.current = null;
+        if (e instanceof ApiError && e.status < 500) { attempt.current = null; store("guidewing.helpAttempt", null); }
         throw e;
       }
     });
-  const cancel = () => active && run(() => api.cancel(active.id));
-  const repeat = () => {
-    enableAudio();
-    if (!announcer.repeat()) announcer.say("There is no message to repeat yet.");
   };
-
-  // Keyboard shortcuts (ignored inside text fields and with modifiers).
-  const shortcuts = useRef({ start, togglePause, help, cancel, repeat, endedMessage, explain, helpBlocked, cancelBlocked, canHelp, canCancel, journey });
-  shortcuts.current = { start, togglePause, help, cancel, repeat, endedMessage, explain, helpBlocked, cancelBlocked, canHelp, canCancel, journey };
+  const cancel = () => {
+    if (!canCancel || !active) { if (!lock.current) explain(cancelBlocked ?? "No request to cancel."); return; }
+    void run("cancel", async () => {
+      announcer.say("Cancellation requested. Waiting for server confirmation.");
+      const result = await api.cancel(active.id).catch(e => {
+        if (!(e instanceof ApiError) || e.status >= 500) cancellationToConfirm.current = active.id;
+        throw e;
+      });
+      if (result.incident.status === "cancelled") announcer.announce(`incident:${active.id}:cancelled`, incidentMessage(result.incident));
+      else announcer.say(`Cancellation not confirmed. Current request status: ${result.incident.status}.`);
+    });
+  };
+  const repeat = () => {
+    enableAudio(); setRepeatCount(n => n + 1);
+    if (feedback === "voice" && !announcer.speechAvailable()) { setSpeechNotice("Speech is unavailable in this browser. Your latest message remains visible as text."); return; }
+    if (!announcer.lastMessage) announcer.say(message); else announcer.repeat();
+  };
+  const shortcuts = useRef({ help, cancel, repeat, togglePause });
+  shortcuts.current = { help, cancel, repeat, togglePause };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (e.ctrlKey || e.metaKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
-      const s = shortcuts.current;
+    const key = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
       const k = e.key.toLowerCase();
-      if (k === "h") (s.canHelp ? s.help() : s.explain(s.helpBlocked));
-      else if (k === "c" || k === "escape") (s.canCancel ? s.cancel() : s.explain(s.cancelBlocked));
-      else if (k === "r") s.repeat();
-      else if (k === "p" && s.journey && (s.journey.status === "active" || s.journey.status === "paused")) s.togglePause();
-      else if (k === "p" && s.journey?.status === "ended") s.endedMessage();
+      if (!shortcutsOn && k !== "escape") return;
+      if (k === "h") shortcuts.current.help();
+      else if (k === "c" || k === "escape") shortcuts.current.cancel();
+      else if (k === "r") shortcuts.current.repeat();
+      else if (k === "p") { if (journey && ["active", "paused"].includes(journey.status)) shortcuts.current.togglePause(); else return; }
       else return;
       e.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [journey, shortcutsOn]);
+  const changeFeedback = (mode: Feedback) => { announcer.stop(); setAudioOn(false); setSpeechNotice(null); setFeedback(mode); store("guidewing.feedback", mode); };
+  const secondsLeft = pending ? Math.max(0, Math.ceil((Date.parse(pending.dispatch_at) - (now + offset.current)) / 1000)) : null;
+  const journeyTitle = !journey ? "Connecting to your journey." : journey.status === "idle" ? "Ready when you are." : journey.status === "active" ? "A little room to move." : journey.status === "paused" ? "Take the time you need." : journey.route_progress >= 1 ? "Your journey is complete." : "Your journey has ended.";
+  const pauseReason = journey?.pause_reason === "obstruction" ? "Obstruction detected in the monitored region." : journey?.pause_reason === "help_request" ? "Paused for your help request." : "Paused by you.";
+  const speechLive = feedback === "screen-reader" || (feedback === "voice" && (!audioOn || !announcer.speechAvailable()));
 
-  const v = vision.data;
-  const pauseText =
-    journey?.pause_reason === "obstruction"
-      ? "Paused: obstruction detected in the path"
-      : journey?.pause_reason === "help_request"
-        ? "Paused: help request"
-        : journey?.pause_reason === "user"
-          ? "Paused by you"
-          : "";
-
-  return (
-    <main className="page user">
-      <header className="topbar">
-        <h1>GuideWing <span className="sub">companion</span></h1>
-        <div className="badges">
-          <ConnectionBadge connection={connection} error={snap.error} />
-          {v && <ModeBadge mode={v.input_mode} ready={v.ready} />}
-        </div>
-      </header>
-
-      <p className="notice">Simulated journey and simulated dispatch organization. This is a prototype, not an emergency service.</p>
-
-      <section aria-labelledby="msg-h" className="card message-card">
-        <h2 id="msg-h">Latest message</h2>
-        <p role="status" aria-live="polite" aria-atomic="true" className="message">
-          {message || "No messages yet."}
-        </p>
-        {!audioOn && (
-          <button className="btn secondary" onClick={enableAudio}>
-            Turn on spoken feedback
-          </button>
-        )}
-        {audioOn && !announcer.speechAvailable() && <p className="warn">Speech is not available in this browser; messages appear as text.</p>}
-      </section>
-
-      <section aria-labelledby="help-h" className="card">
-        <h2 id="help-h">Help request</h2>
-        {active ? (
-          <div className={`incident-status s-${active.status}`}>
-            <p className="big">{STATUS_TEXT[active.status]}</p>
-            {secondsLeft !== null && (
-              <p className="countdown" aria-live="off">
-                Sends in <strong>{secondsLeft}</strong> second{secondsLeft === 1 ? "" : "s"} unless cancelled.
-              </p>
-            )}
-            {active.request_source === "test" && <p className="test-label">TEST request (developer control)</p>}
-          </div>
-        ) : (
-          <p className="big">
-            {state?.last_incident && TERMINAL.includes(state.last_incident.status)
-              ? `No active request. Last request: ${STATUS_TEXT[state.last_incident.status].toLowerCase()}.`
-              : "No active request."}
-          </p>
-        )}
-        <div className="controls">
-          <button
-            className="btn danger huge"
-            onClick={() => (canHelp ? help() : explain(helpBlocked))}
-            disabled={busy}
-            aria-disabled={!canHelp}
-            aria-describedby={helpBlocked ? "help-blocked" : undefined}
-            aria-keyshortcuts="H"
-          >
-            Help <kbd>H</kbd>
-          </button>
-          <button
-            className="btn huge"
-            onClick={() => (canCancel ? cancel() : explain(cancelBlocked))}
-            disabled={busy}
-            aria-disabled={!canCancel}
-            aria-describedby={active && cancelBlocked ? "cancel-blocked" : undefined}
-            aria-keyshortcuts="C Escape"
-          >
-            Cancel request <kbd>C</kbd>
-          </button>
-          <button className="btn" onClick={repeat} aria-keyshortcuts="R">
-            Repeat last message <kbd>R</kbd>
-          </button>
-        </div>
-        {helpBlocked && <p className="hint" id="help-blocked">{helpBlocked}</p>}
-        {active && cancelBlocked && <p className="hint" id="cancel-blocked">{cancelBlocked}</p>}
-      </section>
-
-      <section aria-labelledby="journey-h" className="card">
-        <h2 id="journey-h">Journey</h2>
-        {journey ? (
-          <dl className="facts">
-            <dt>Status</dt>
-            <dd>{journey.status}{pauseText ? ` — ${pauseText}` : ""}</dd>
-            <dt>Progress</dt>
-            <dd>{Math.round(journey.route_progress * 100)}% of the demo route, last waypoint {journey.waypoint ?? "—"}</dd>
-            <dt>Location</dt>
-            <dd>{describeLocation(journey.location)}</dd>
-          </dl>
-        ) : (
-          <p>Loading journey…</p>
-        )}
-        <div className="controls">
-          {journey?.status === "idle" && (
-            <button className="btn primary huge" onClick={start} disabled={busy}>
-              Start journey
-            </button>
-          )}
-          {(journey?.status === "active" || journey?.status === "paused") && (
-            <button className="btn huge" onClick={togglePause} disabled={busy} aria-keyshortcuts="P">
-              {journey.status === "paused" ? "Resume journey" : "Pause journey"} <kbd>P</kbd>
-            </button>
-          )}
-          {journey?.status === "ended" && (
-            <>
-              <p className="big">
-                {journey.route_progress >= 1 ? "You reached the end of the demo route." : "This journey has ended."}
-              </p>
-              <button className="btn primary huge" onClick={startNew} disabled={busy}>
-                Start a new journey
-              </button>
-            </>
-          )}
-        </div>
-      </section>
-
-      <section aria-labelledby="cam-h" className="card">
-        <h2 id="cam-h">Camera</h2>
-        {v ? (
-          <p>
-            {MODE_LABEL[v.input_mode]}
-            {v.source_label ? ` (${v.source_label})` : ""}. {v.ready ? "Recognition running." : v.error ?? "Not ready."}{" "}
-            {v.ready && (v.gesture_armed ? "Open-palm request armed." : "Lower your hand to re-arm the open-palm request.")}
-            {v.obstruction_active ? " Obstruction currently in the monitored path region." : ""}
-          </p>
-        ) : (
-          <p>Checking camera…</p>
-        )}
-        {v && (v.input_mode === "live" || v.input_mode === "replay") && (
-          <>
-            <button className="btn secondary" onClick={() => setShowPreview((x) => !x)} aria-expanded={showPreview}>
-              {showPreview ? "Hide camera preview" : "Show camera preview"}
-            </button>
-            {showPreview && (
-              <img
-                className="preview"
-                src="/api/vision/stream"
-                alt="Annotated camera preview: monitored path region, detected chairs and people, and hand landmarks."
-              />
-            )}
-          </>
-        )}
-        <p className="hint">Button help keeps working if the camera fails.</p>
-      </section>
-
-      {actionError && (
-        <p className="error" role="alert">
-          {actionError}
-        </p>
-      )}
-      <footer className="shortcuts">
-        Shortcuts: <kbd>H</kbd> help, <kbd>C</kbd>/<kbd>Esc</kbd> cancel, <kbd>R</kbd> repeat, <kbd>P</kbd> pause/resume.
-      </footer>
+  return <div className="app-shell">
+    <a className="skip-link" href="#main-content" onClick={e => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
+    <header className="site-header"><div className="header-inner">
+      <a className="brand" href="#home" onClick={() => setView("home")} aria-label="Guide Wing home"><Icon name="drone" /><span>Guide Wing</span></a>
+      <nav aria-label="Main navigation"><a href="#home" onClick={() => setView("home")} aria-current={view === "home" ? "page" : undefined}>Home</a><a href="#settings" onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined}>Settings</a></nav>
+      <a className="desk-link" href="/responder">Responder desk <Icon name="arrow" /></a>
+    </div></header>
+    <main id="main-content" tabIndex={-1} className="companion-main">
+      <div className="content-width">
+        <Entrance ready={!!state} error={!state ? snap.error : null} retry={() => { void snap.refresh(); }} />
+        {view === "home" ? <>
+          <section className="hero" aria-labelledby="home-title"><div><p className="eyebrow">Your journey, at your pace</p><h1 id="home-title">A little guidance.<br /><span>Room to move.</span></h1><p className="hero-caption">Simple controls. Clear updates.<br />Your next step is always yours.</p></div><Atmosphere /></section>
+          <section className="journey-section" aria-labelledby="journey-title"><div className="journey-copy"><p className="eyebrow">Journey <span className="status-chip">{journey?.status ?? "Connecting"}</span></p><h2 id="journey-title">{journeyTitle}</h2><p>{journey?.status === "paused" ? pauseReason : journey?.status === "active" ? `Near ${journey.waypoint ?? "the start"}. Location and movement are simulated.` : journey?.status === "ended" ? "Start a new journey when you are ready." : "Start the simulated route to enable Help and open-palm requests."}</p>{journey && journey.status !== "idle" && <><progress max="1" value={journey.route_progress} aria-label="Simulated journey progress" /><p className="hint">{Math.round(journey.route_progress * 100)}% of the demo route &middot; {describeLocation(journey.location)}</p></>}</div><div className="journey-action">
+            {journey?.status === "idle" && <button className="btn primary" disabled={!!busy || !ready} onClick={start}>Start journey <Icon name="arrow" /></button>}
+            {journey && ["active", "paused"].includes(journey.status) && <button className="btn primary" disabled={!!busy || !ready} onClick={togglePause} aria-keyshortcuts="P">{journey.status === "paused" ? "Resume journey" : "Pause journey"}<Icon name={journey.status === "paused" ? "play" : "pause"} /></button>}
+            {journey?.status === "ended" && <><button className="btn primary" disabled={!!busy || !ready || !!active} onClick={startNew}>Start a new journey <Icon name="arrow" /></button>{active && <p className="hint">Cancel or resolve the active help request first.</p>}</>}
+          </div></section>
+          <section className="request-strip" aria-label="Help request status"><span className="status-dot" /><div><strong>{busy === "cancel" ? "Cancellation requested" : active ? STATUS_TEXT[active.status] : state?.last_incident ? `Last request: ${STATUS_TEXT[state.last_incident.status].toLowerCase()}` : "No active help request"}</strong><p aria-live="off">{secondsLeft !== null ? secondsLeft > 0 ? `${secondsLeft} seconds left to cancel before simulated dispatch.` : "Deadline reached. Waiting for the server dispatch confirmation." : active?.status === "acknowledged" ? "Acceptance is confirmed by the backend. The responder can mark the request resolved." : active?.status === "dispatched" ? "Cancel remains available until the request is accepted." : "Tap Help once. No holding is required."}</p></div></section>
+          <details className="camera-details"><summary>Camera & hands-free help {v && <ModeBadge mode={v.input_mode} ready={v.ready} />}</summary><p>{v ? `${MODE_LABEL[v.input_mode]}. ${v.ready ? "Recognition running." : v.error ?? "Not ready."} ${v.ready ? v.gesture_armed ? "Hold an open palm for two seconds to request help." : "Lower your hand to re-arm open-palm help." : ""} ${v.obstruction_active ? "Obstruction detected in the monitored region." : ""}` : "Checking camera..."}</p><p className="hint">Button help works independently of camera recognition.</p>{v && ["live", "replay"].includes(v.input_mode) && <><button className="btn" onClick={() => setShowPreview(x => !x)} aria-expanded={showPreview}>{showPreview ? "Hide camera preview" : "Show camera preview"}</button>{showPreview && <img className="preview" src="/api/vision/stream" alt="Live annotated camera preview showing the monitored region and recognized objects and hands." />}</>}</details>
+        </> : <section className="settings" aria-labelledby="settings-title"><p className="eyebrow">Make it yours</p><h1 id="settings-title">Settings</h1><fieldset><legend>How you hear updates</legend><p>Choose one announcement channel to avoid hearing the same update twice.</p>{([["voice", "Spoken feedback", "Browser speech, or the configured server voice. Starts after a button or keyboard interaction."], ["screen-reader", "Screen reader", "Announce updates through TalkBack or your screen reader. App speech is off."], ["text", "Text only", "Keep messages visible without automatic spoken updates."]] as const).map(([value, label, hint]) => <label className="radio-option" key={value}><input type="radio" name="feedback" value={value} checked={feedback === value} onChange={() => changeFeedback(value)} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</fieldset>
+          <label className="checkbox-option"><input type="checkbox" checked={shortcutsOn} onChange={e => { setShortcutsOn(e.target.checked); store("guidewing.shortcuts", e.target.checked); }} />Enable single-key shortcuts (H, C, R, P)</label><section className="settings-section"><h2>Connected to the prototype</h2><p>The FastAPI backend stores requests, owns the 10-second window, and confirms responder actions. Dispatch and location are simulated. No real emergency service is contacted.</p><p>Sign-in is not implemented in this source project. No assistance service or account provider is implied.</p><a href="/responder">Open responder desk</a> ? <a href="/sim">Open 2D simulation</a></section>
+          <section className="settings-section"><h2>Journey & browser limits</h2><p>The backend ends the route when progress reaches 100%. Ending or pausing a journey does not cancel an existing help request.</p>{journey && ["active", "paused"].includes(journey.status) && <button className="btn" disabled={!!busy || !ready} onClick={() => { void run("journey", () => api.journeyAction(journey.id, "end")); }}>End journey</button>}<p>Keep this page open for spoken acknowledgment. After submission, the running backend owns dispatch even if this tab is suspended. The browser cannot guarantee audio or gesture delivery while closed. Refresh restores server state and never sends a request automatically.</p><p className="hint">Keyboard: H Help / C or Escape Cancel / R Repeat / P Pause or Resume. Tab and Enter also work on every control.</p></section>
+        </section>}
+        <div className="connection-row"><ConnectionBadge connection={connection} error={snap.error || (state && stale ? "Stale state" : null)} />{(!ready && state) && <button className="text-button" onClick={() => { void snap.refresh(); }}>Retry connection</button>}<p>Demonstration only. No real help service or physical drone is connected.</p></div>
+        {attempt.current && !active && <p className="warn">A previous Help attempt has no confirmation. Pressing Help explicitly retries the same request key; refresh never retries it.</p>}
+        {actionError && <p className="error">{actionError}</p>}
+      </div>
     </main>
-  );
+    <section className="action-area" aria-label="Assistance controls"><div className="content-width">
+      <div className="latest-message"><svg className="message-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.4" /><circle cx="12" cy="12" r="5" fill="currentColor" /></svg><div><p className="eyebrow">Latest message</p><p aria-live={speechLive ? "polite" : "off"} aria-atomic="true"><span key={repeatCount}>{message}</span></p></div></div>
+      <div className="primary-controls"><button className="btn help-button" onClick={help} aria-disabled={!canHelp} aria-describedby="help-hint" aria-keyshortcuts="H"><Icon name="help" /><span>{busy === "help" ? "Requesting..." : "Help"}</span></button><button className="btn cancel-button" onClick={cancel} aria-disabled={!canCancel} aria-describedby="cancel-hint" aria-keyshortcuts="C Escape"><Icon name="cancel" /><span>Cancel</span></button><button className="btn repeat-button" onClick={repeat} aria-keyshortcuts="R"><Icon name="repeat" /><span>Repeat last message</span></button></div>
+      <div className="action-hints"><p id="help-hint">{helpBlocked ?? "Tap Help \u00b7 10 seconds to cancel"}</p><p id="cancel-hint">{cancelBlocked ?? "Cancel this request"}</p></div>
+      {(speechNotice || (feedback === "voice" && !announcer.speechAvailable())) && <p className="hint" role="status">{speechNotice ?? "Speech is unavailable in this browser. Messages remain visible as text."}</p>}
+    </div></section>
+  </div>;
 }
