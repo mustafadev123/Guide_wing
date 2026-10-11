@@ -134,6 +134,7 @@ export interface AnalyticsReport {
     resolved_sample: number;
   };
   text: string | null;
+  sections?: { overview: string; response_times: string; next_check: string } | null;
   reason: string | null;
   cached: boolean;
   retry_after_s: number;

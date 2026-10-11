@@ -20,9 +20,9 @@
       "files": {
         "backend/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "backend/app/main.py": "1bbff84f1a9ee4f9835c507175e98c275e17f4418824f83cd961638eb245d005",
+        "backend/app/main.py": "6be1fb2495737cdb8a01bfe5e556ee4fe22f713774e81b2636aa9f43c64fa8e8",
         "backend/app/schemas.py": "be52e007e5261aa8493788a8024aaaecc960f671d808e09b3f6beb9959126196",
-        "backend/app/analytics.py": "771e406ef865cba737fdc225e7eb4482aaced0bfe962dc6b2a696e5e14833278"
+        "backend/app/analytics.py": "0b40ff27318d67cd7fa1e2c1bab40c2e501fe5fd05d5e272f4cd5935199381eb"
       }
     },
     "lifecycle": {
@@ -35,7 +35,7 @@
     },
     "vision": {
       "files": {
-        "backend/app/config.py": "d4003cd47d70644e53906bdacbcdfdb456c4b408f99f86047cf00f07cedd09c4",
+        "backend/app/config.py": "b3093094396fcc158dac5980e55495225f0080fff3ab7aecb81fe149d0e02591",
         "backend/app/snapshot.py": "242f53c3119f8ef97b6cbca51ff1c40d9cad788be55844497dd104707a1e3853",
         "backend/app/vision/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "backend/app/vision/camera.py": "9507ec55b6eaf8194208f5df836debeb9802078035a5c57fd765f1b7a3aaabbf",
@@ -45,7 +45,7 @@
     },
     "simulation": {
       "files": {
-        "backend/app/config.py": "d4003cd47d70644e53906bdacbcdfdb456c4b408f99f86047cf00f07cedd09c4",
+        "backend/app/config.py": "b3093094396fcc158dac5980e55495225f0080fff3ab7aecb81fe149d0e02591",
         "backend/app/route.py": "db0ba9592324cea4a1e9ee303b15c001c8d984ef8ebaec6f059e389ec663ec95",
         "backend/app/route_campus_demo_v1.json": "44f556d932566412ecbd2dbb35c2e8b7fcfe4bad48bb83fb7748bc9cfe7d6d26",
         "backend/app/schemas.py": "be52e007e5261aa8493788a8024aaaecc960f671d808e09b3f6beb9959126196",
@@ -57,54 +57,54 @@
         "frontend/index.html": "8166043028409ff148089f872b85923e349cdfbf6079cce721ce16b0826c4d9b",
         "frontend/package-lock.json": "e550d2209aa0d4ee2b1e6c83cb7fdbdb37a9924611fc3beaccc06a227fad34da",
         "frontend/package.json": "ccf42c50ed188fba60fa02a0c1c24c42518ece6ea0f6f61ec6da2cd60e697da4",
-        "frontend/src/api.ts": "7530f52ea4116c1d5c295bb6079b2ef6f548dc74683432fedf76569ea23c0696",
+        "frontend/src/api.ts": "8feabaf0300d51701788d7ed06866f6b462ae5dc29b8bba4e46d87405b0e0890",
         "frontend/src/components.tsx": "7540bae79926518731327bdebf4e78dadf72e3785e260b696d893ebf1e3fd952",
         "frontend/src/events.ts": "cfdcc83539671341da8251c1b5fa36388549589a69c05d95d6b5c93edc147b1d",
         "frontend/src/main.tsx": "508a07cacf8f0674c15b39ac5e5a4bce0b3f551e7c4ae164d23d974edb8cbfa8",
         "frontend/src/pages/DevPage.tsx": "601630252595bcea11d3c814e1dec0f7a82ba1cea8b5cf46e9b2a248d7845698",
-        "frontend/src/pages/ResponderPage.tsx": "f1a85183c48332ad3676ace5ef418389f844f4a00d954f5c551c77ea710e4887",
+        "frontend/src/pages/ResponderPage.tsx": "3666e8277fd3c36ff72cf34d1a33b77205132db7c50ba6d95f704f3aa3f1bb1d",
         "frontend/src/pages/SimPage.tsx": "bcaa8a8d3476f588179e55f336d32a7983d2b9d6240abb9a1b21aef5f2e49b6f",
         "frontend/src/pages/UserPage.tsx": "abffc50f524140a304f44a4488f024df56ebb4480e1d77d80e8b8bc9874fd9ca",
         "frontend/src/speech.ts": "a9676f2ebcb31df0fb71d863776e9488ec1dce5fb18c88d77a33fafa2c1532a0",
-        "frontend/src/styles.css": "6a7b7f6093db8f5370dede1d637cf3b382828e6566ac5c9ca903f6a41da6ddb0",
+        "frontend/src/styles.css": "be658d867fc096ddc4af8e6ac7945984872801dfa10a7bff90c284f588a98352",
         "frontend/tsconfig.json": "884e198e325feb01cccc3ebc0d204f5e3db50d9b0bb12d25a9aa28d345fc11dd",
         "frontend/vite.config.ts": "7663d44608428a30f18f86c70783657bc8e09e5cd90589acf5e7ccee710f5685",
         "frontend/src/ui.tsx": "43f49b1eec1afd1d50443d38e16bb7a12630f12c58f25d520ee5d839dae1c4f5",
         "frontend/src/analytics.tsx": "4a929c955c9e163efbd741c19da83b6b47971b86409f9c5df7f8103e0ad56ca9",
         "frontend/tests/analytics.test.cjs": "dabe0b0bd66954f136ff8f08913de905ab3ee403ba848cf11d11117b9f7fad24",
-        "docs/FRONTEND.md": "745070a4f6acfb31bd042ef2caf9aa54ed811e5a04f76d08879b420738bd6124",
-        "frontend/src/AnalyticsSummary.tsx": "4b01c4d885e3bf968d903ca2dd42f37b534afe9980eb14e6095ae2f9b6ac9bbd",
+        "docs/FRONTEND.md": "86d78ac4956ce070c7bc25e598278be7cdf8f2dc3ed78c3afd673dd21f26b627",
+        "frontend/src/AnalyticsSummary.tsx": "889270b36efb61c6968f47dfe12d6064e9d75c9044d23190d29b0af6d7f1b8d6",
         "frontend/src/analyticsMetrics.ts": "8228991c0e2d951fca4118a40a2ac9b0040dd8bc8a9a83fcebe55f29b29915e7"
       }
     },
     "sponsors": {
       "files": {
-        "backend/app/config.py": "d4003cd47d70644e53906bdacbcdfdb456c4b408f99f86047cf00f07cedd09c4",
-        "backend/app/main.py": "1bbff84f1a9ee4f9835c507175e98c275e17f4418824f83cd961638eb245d005",
-        "backend/app/providers.py": "2c30d2747ef23b56d0ceca4d412e1e0d7a00ba93f171e7099dcf9ccb668ad3e0",
-        "backend/app/sponsors.py": "ef85e5d4eeb4869bdab21d7b7b773bb3fbc5cf072a59114d6998aee592cd75aa",
-        "frontend/src/pages/ResponderPage.tsx": "f1a85183c48332ad3676ace5ef418389f844f4a00d954f5c551c77ea710e4887",
+        "backend/app/config.py": "b3093094396fcc158dac5980e55495225f0080fff3ab7aecb81fe149d0e02591",
+        "backend/app/main.py": "6be1fb2495737cdb8a01bfe5e556ee4fe22f713774e81b2636aa9f43c64fa8e8",
+        "backend/app/providers.py": "06998e91e3b21352ecad1fbfd36e203513c6862b51dd585af795da11cd990770",
+        "backend/app/sponsors.py": "a6459103b5ebb72e3dbf9349886b11c3edc6ecb8556fda827dcb5b427a429e7b",
+        "frontend/src/pages/ResponderPage.tsx": "3666e8277fd3c36ff72cf34d1a33b77205132db7c50ba6d95f704f3aa3f1bb1d",
         "frontend/src/speech.ts": "a9676f2ebcb31df0fb71d863776e9488ec1dce5fb18c88d77a33fafa2c1532a0",
-        "backend/app/analytics.py": "771e406ef865cba737fdc225e7eb4482aaced0bfe962dc6b2a696e5e14833278",
-        "frontend/src/AnalyticsSummary.tsx": "4b01c4d885e3bf968d903ca2dd42f37b534afe9980eb14e6095ae2f9b6ac9bbd",
+        "backend/app/analytics.py": "0b40ff27318d67cd7fa1e2c1bab40c2e501fe5fd05d5e272f4cd5935199381eb",
+        "frontend/src/AnalyticsSummary.tsx": "889270b36efb61c6968f47dfe12d6064e9d75c9044d23190d29b0af6d7f1b8d6",
         "frontend/src/analyticsMetrics.ts": "8228991c0e2d951fca4118a40a2ac9b0040dd8bc8a9a83fcebe55f29b29915e7",
         "frontend/src/analytics.tsx": "4a929c955c9e163efbd741c19da83b6b47971b86409f9c5df7f8103e0ad56ca9",
-        "frontend/src/api.ts": "7530f52ea4116c1d5c295bb6079b2ef6f548dc74683432fedf76569ea23c0696",
-        "docs/GEMINI_ANALYTICS.md": "092c9e59589a1672874e902832f8c3d360b696e202fc67fbd0a56f129b4e5582"
+        "frontend/src/api.ts": "8feabaf0300d51701788d7ed06866f6b462ae5dc29b8bba4e46d87405b0e0890",
+        "docs/GEMINI_ANALYTICS.md": "0b7026698a8395041234f061cb916cf90b532c34c8635e3375931f4745ea21f1"
       }
     },
     "operations": {
       "files": {
-        ".env.example": "b7d9bb2d36e782639085a50b9d4001ed24c8d5923711b1ed83c22820dacc6225",
+        ".env.example": "8c285a82c5d4f38d025daf07549c536f42ea013f47c8404d7d866d4e6860cade",
         ".gitattributes": "d8fb0de4792538f93822b2c0d235604921299d5e54a3d6ec7a6cb34536e8bf1e",
-        ".gitignore": "e14dd14142d3916b1b72ac927c31d397e306eafa8670e82976a4f16029503e29",
+        ".gitignore": "3f870d44ad7ff32d1794e0c70b11bfdd5d5ccd55050cd7932b9871f811bae54a",
         "requirements.txt": "8c64380d6b484c691ea122221ec4384689dc8c29ba8e958681e3dff2f839d3a3",
         "scripts/build_frontend.ps1": "a4aba5c24e5c0916b7ef7c9dd040fbd7c836708dd6f92b04945c6f4740db1b9c",
         "scripts/download_models.py": "096db1617f50cb38722ded5ea9429c6e11a8c435a4a0d6fe962ea55762c9804f",
         "scripts/setup.ps1": "80674d9de1993c0f22f6b526ff4f039003193241f1e61122e92bbdd63d7a35a8",
         "scripts/start.ps1": "52c2579afb36d590580960be967700fd67bd0d28be3d96bf82c73a1634ecce2d",
         "scripts/stop.ps1": "2d44d2fc306f77545fea8255b927331f59035b86ded33d2912cd149ee3c3db5f",
-        "docs/GEMINI_ANALYTICS.md": "092c9e59589a1672874e902832f8c3d360b696e202fc67fbd0a56f129b4e5582"
+        "docs/GEMINI_ANALYTICS.md": "0b7026698a8395041234f061cb916cf90b532c34c8635e3375931f4745ea21f1"
       }
     },
     "tests": {
@@ -113,7 +113,7 @@
         "backend/tests/conftest.py": "9f3563ff8e3cda932b2d93e560f9c7bc852fbbb29495f606c4b538547a6a7292",
         "backend/tests/test_lifecycle.py": "393a67d5f5d855f0c89251066772b0fee7710da36a7b24fd5286105ad8428ddd",
         "backend/tests/test_simulation.py": "a5949260ef26f3516ed75a3098aa4087d9c96affc1476715e984f5e0c6672b15",
-        "backend/tests/test_sponsors.py": "9d93853675757c9bfae8f29a8c41a3e4e1cc4652324d513c8a0b6ad8b4498dc4",
+        "backend/tests/test_sponsors.py": "29f41aa4fe1d8127a6b8e7048bcc77e646b08e9882ad953d58133dd1a61934e5",
         "backend/tests/test_vision_logic.py": "3094bc96f73fd8a360ab1cc25753d58303f6e6e9eda1975d852b81f2a409fc9d",
         "pytest.ini": "13c61dc1584361cfe3844fd7c5bcfb1c9dba7c13bcd793e845ffd752d9f75ec1",
         "scripts/check_environment.py": "31ba2eb4bf86b89e438f94c676b1bbcb91647a1cd1cddc4e20072b113f1747bd",
@@ -122,16 +122,16 @@
         "scripts/test_camera.py": "258b99019270daa331c852ce7e940e779301d82cc5207162cb42cbe0d02262f2",
         "scripts/unreal_diag_client.py": "7dce3a83e456bee357ed753b25e8939512b4887780c3fad7a5d5da3d89894372",
         "scripts/vision_replay_check.py": "d6fd951e313c99656368339d14d6f1cf2cdbdd4e676279accc8763922bc05e96",
-        "backend/tests/test_analytics.py": "79e5d44ba59a62d7f1695ea6e32276076a6cf3b1044fb9cc7f44ccb671f96ec3",
+        "backend/tests/test_analytics.py": "81b782144d089b33ff31e7baff9984e876474d20e212341d256d3de5a24f48f2",
         "frontend/tests/analytics.test.cjs": "dabe0b0bd66954f136ff8f08913de905ab3ee403ba848cf11d11117b9f7fad24"
       }
     },
     "status": {
       "files": {
-        "README.md": "8089f1153b768f321f2f4e24f90f4cdc560b1b7fcb81ce82782036dd6081fbd2",
+        "README.md": "4af346003ab3d68a78fd72a454e2d908814235be642b1d0be9b614f30e0fe635",
         "backup.md": "871dbbe0e2709392bb688917a3429fa1d918e4f2061a3affd246d4cbf7063f8e",
         "docs/BACKUP_VIDEO_SCRIPT.md": "ec682fbe6a2e72d80f71cea0abbde1665be61bb4f9fc066881e559da950b5d1b",
-        "docs/CONTRACT.md": "3f14bf04482b747216a80b04f72bdea5c87eb31c5a7d8dab09480d86f7b2484a",
+        "docs/CONTRACT.md": "e66f7600e2130f6b1b1a38478a4ccad4bdcba65133371f633bbf13e4da3d57c2",
         "docs/DEMO_SCRIPT.md": "478a11207382c0108af45b03c452ca32575b0bc30f6f7242ecf2e7dca790d526",
         "docs/HANDS_ON_TEST_CHECKLIST.md": "50f06f6737d67a5ddb0b476274fd763b707ba571a0f863d886c1827b20b37c90",
         "docs/LIMITATIONS.md": "257712605f028351519966c2254bda8cb401c10ec57f73d9bbf0abdf9ab68faf",
@@ -158,8 +158,8 @@
     },
     "reference": {
       "files": {
-        "AGENTS.md": "7a28c8c5f454bdc28f899b7d555e3a75580bfbef325b0d61c3af5fab8320634d",
-        "docs/ARCHITECTURE.md": "c9e9c8c718394cac22e31ce3e5a41ddb311388b756123cc76c779b818a758ca0",
+        "AGENTS.md": "6ab516e4bc47e6e507a4e50953b82b9f721019c240cc788f1163218901ba3066",
+        "docs/ARCHITECTURE.md": "476fe1f2d498464554e0e481149b9a330954a9244bb0fb2140027a41fad67663",
         "scripts/check_architecture_index.py": "1f5bbc74fb0cb63300cb30ed669ef4ab819fc36277cbaa0a5ad92bd53bb4b04e"
       }
     }

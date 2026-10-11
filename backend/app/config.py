@@ -68,7 +68,7 @@ class Settings:
     elevenlabs_model_id: str = "eleven_flash_v2_5"
     tts_cache_dir: Path = REPO_ROOT / "backend" / "data" / "tts_cache"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_analytics_model: str = "gemini-3.8-flash"
 
 

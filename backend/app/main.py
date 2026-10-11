@@ -279,13 +279,16 @@ def create_app(settings: Settings | None = None, clock=None, start_background: b
         out["deterministic"] = out["text"]
         if svc.ai_briefing is None:
             out["ai_status"] = "not_configured"
+            out["ai_reason"] = "Add GEMINI_API_KEY to the server .env and restart the backend."
             return out
-        if detail.status in ("dispatched", "acknowledged", "resolved"):
+        out["ai_model"] = svc.ai_briefing.model
+        if detail.status in ("dispatched", "acknowledged", "resolved", "cancelled"):
             svc.ai_briefing.request_async(incident_id, incident_facts(detail))
         result = svc.ai_briefing.result(incident_id) or {"status": "not_requested"}
         out["ai_status"] = result["status"]
+        out["ai_retry_after_s"] = result.get("retry_after_s", 0)
         if result["status"] == "ready":
-            out.update(provider="gemini", text=result["text"])
+            out.update(provider="gemini", text=result["text"], ai_review=result.get("review"))
         elif "reason" in result:
             out["ai_reason"] = result["reason"]
         return out

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.app.analytics import AnalyticsSummaries, GeminiAnalytics, SummaryRequest, aggregate
+from backend.app.analytics import AnalyticsSummaries, GeminiAnalytics, SummaryRequest, aggregate, analysis_context
 from backend.app.services import Conflict, NotFound
 from backend.tests.conftest import Harness
 
@@ -23,7 +23,7 @@ def analytics_clock(clock):
 
 
 def row(**changes):
-    values = dict(created_at="2026-10-10T01:00:00Z", status="resolved", is_test=False,
+    values = dict(created_at="2026-10-10T01:00:00Z", status="resolved", is_test=False, request_source="gesture",
                   dispatched_at="2026-10-10T01:00:10Z", acknowledged_at="2026-10-10T01:00:40Z",
                   resolved_at="2026-10-10T01:02:40Z", id="private-id", responder="private-name",
                   request_key="private-key", location={"landmark": "private-place", "latitude": 33.0})
@@ -32,7 +32,9 @@ def row(**changes):
 
 def reply(summary=GOOD):
     return json.dumps({"candidates": [{"content": {"parts": [
-        {"text": "hidden reasoning", "thought": True}, {"text": json.dumps({"summary": summary})},
+        {"text": "hidden reasoning", "thought": True}, {"text": json.dumps({"overview": summary,
+          "response_times": "Timing figures describe the recorded responses, not an established service baseline.",
+          "next_check": "Review the acceptance step during the next rehearsal."})},
     ]}}]}).encode()
 
 
@@ -78,7 +80,7 @@ def test_provider_receives_only_aggregates_and_cache_is_stable(clock):
     manager = AnalyticsSummaries(lambda: [row()], clock, provider)
     first = manager.request(SummaryRequest())
     out = finished(manager, first.job_id)
-    assert out.status == "ready" and out.text == GOOD
+    assert out.status == "ready" and out.sections.overview == GOOD and GOOD in out.text
     clock.advance(2)
     repeated = manager.request(SummaryRequest())
     assert repeated.cached and repeated.as_of == first.as_of and len(calls) == 1
@@ -190,3 +192,52 @@ def test_cache_has_bounded_entries_and_unknown_job_is_explicit(clock):
     second = manager.request(SummaryRequest(range="week")); finished(manager, second.job_id)
     third = manager.request(SummaryRequest(range="loaded")); finished(manager, third.job_id)
     with pytest.raises(NotFound): manager.get(first.job_id)
+
+
+def test_interpretation_facts_use_recorded_sources_cancel_stage_and_timing_distribution(clock):
+    rows = [row(), row(request_source="button", acknowledged_at="2026-10-10T01:09:40Z"),
+            row(status="cancelled", dispatched_at=None, acknowledged_at=None, resolved_at=None),
+            row(status="cancelled", request_source="button", acknowledged_at=None, resolved_at=None),
+            row(is_test=True)]
+    selection = SummaryRequest()
+    metrics = aggregate(rows, selection, clock.now())
+    context = analysis_context(rows, selection, clock.now(), metrics)
+    assert context["request_sources"] == {"button": 2, "gesture": 2, "test": 0}
+    assert context["cancelled_before_dispatch"] == context["cancelled_after_dispatch"] == 1
+    assert context["resolved_share_percent"] == context["cancelled_share_percent"] == 50
+    assert context["open_requests"] == 0
+    assert context["acceptance"]["mean_seconds"] == 300
+    assert context["acceptance"]["median_seconds"] == 300
+    assert context["acceptance"]["slowest_minutes"] == 9.5
+    assert context["resolution"]["sample"] == 1  # second resolution predates acceptance
+
+
+def test_numeric_report_accepts_only_numbers_present_in_server_facts():
+    out = GeminiAnalytics("fake", "model", post=lambda *a: reply(
+        "This simulated queue has 4 requests, with 2 resolved and 50% cancelled.")).generate(
+            {"metrics": {"total": 4}, "analysis": {"resolved": 2, "cancelled_share_percent": 50.0}})
+    assert out["status"] == "ready" and out["sections"].overview.startswith("This simulated")
+    rejected = GeminiAnalytics("fake", "model", post=lambda *a: reply(
+        "This simulated queue has 4 requests with 99% resolved.")).generate({"metrics": {"total": 4}})
+    assert rejected["status"] == "rejected"
+    for invented in ("1,000", "1e6"):
+        result = GeminiAnalytics("fake", "model", post=lambda *a: reply(
+            f"This simulated queue has {invented} requests.")).generate({"metrics": {"total": 1, "pending": 0}})
+        assert result["status"] == "rejected"
+
+
+def test_empty_interpretation_has_no_invented_durations_or_rates(clock):
+    selection = SummaryRequest()
+    out = analysis_context([], selection, clock.now(), aggregate([], selection, clock.now()))
+    assert out["resolved_share_percent"] is None and out["open_requests"] == 0
+    assert all(out["acceptance"][name] is None for name in ("mean_seconds", "median_seconds", "slowest_minutes"))
+
+
+def test_interpretation_change_invalidates_cache_when_primary_counts_and_means_match(clock):
+    rows = [row()]
+    calls = []
+    manager = AnalyticsSummaries(lambda: rows, clock, GeminiAnalytics("fake", "model", post=lambda *a: calls.append(a) or reply()))
+    first = manager.request(SummaryRequest()); finished(manager, first.job_id)
+    rows[0].request_source = "button"
+    second = manager.request(SummaryRequest()); finished(manager, second.job_id)
+    assert first.metrics == second.metrics and first.job_id != second.job_id and len(calls) == 2

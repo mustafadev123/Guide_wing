@@ -1,8 +1,10 @@
 """Sponsor providers with stubbed HTTP (no real API calls, no keys)."""
 
 import json
+import threading
+import urllib.error
 
-from backend.app.sponsors import ElevenLabsSpeech, GeminiBriefing, validate_briefing
+from backend.app.sponsors import ElevenLabsSpeech, GeminiBriefing, validate_briefing, incident_facts
 from backend.tests.conftest import Harness
 
 FACTS = {
@@ -16,7 +18,12 @@ FACTS_TEXT = json.dumps(FACTS, indent=1)
 def gemini_reply(summary: str):
     def post(url, headers, body, timeout):
         assert "x-goog-api-key" in headers
-        return json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps({"summary": summary})}]}}]}).encode()
+        payload = json.loads(body)
+        assert payload["generationConfig"]["responseFormat"]["text"]["schema"]["required"] == ["outcome", "timing"]
+        assert "unknowns:" not in payload["contents"][0]["parts"][0]["text"]
+        assert json.loads(body)["generationConfig"]["responseFormat"]["text"]["mimeType"] == "APPLICATION_JSON"
+        return json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps({"outcome": summary,
+            "timing": "This record captures a response sequence, not a service performance baseline."})}]}}]}).encode()
 
     return post
 
@@ -94,3 +101,85 @@ def test_ai_briefing_never_blocks_lifecycle(settings, clock):
         assert "secret" not in json.dumps(h.client.get("/api/health").json())
     finally:
         h.close()
+
+
+def wait_review(provider, incident_id):
+    for _ in range(200):
+        out = provider.result(incident_id)
+        if out and out["status"] != "pending":
+            return out
+        threading.Event().wait(.01)
+    raise AssertionError("Stub review did not complete")
+
+
+def test_incident_review_receives_elapsed_times_without_identities_coordinates(h):
+    jid=h.start(); iid=h.request_help(jid).json()["incident"]["id"]
+    h.tick(49)
+    h.client.post(f"/api/incidents/{iid}/accept",json={"responder":"private-name"})
+    h.tick(9);h.client.post(f"/api/incidents/{iid}/resolve")
+    facts=incident_facts(h.svc.incidents.detail(iid))
+    assert facts["timings_seconds"]["dispatch_to_acceptance"] == 39
+    assert facts["timings_seconds"]["acceptance_to_resolution"] == 9
+    assert all(secret not in json.dumps(facts) for secret in (iid,"private-name","latitude","longitude","request_key"))
+    good=GeminiBriefing("fake","model",post=gemini_reply("Simulated location. Acceptance took 39 seconds and resolution took 9 seconds."))
+    assert good.generate(facts)["status"] == "ready"
+    bad=GeminiBriefing("fake","model",post=gemini_reply("Simulated location. Acceptance took 999 seconds."))
+    assert bad.generate(facts)["status"] == "rejected"
+
+
+def test_changed_incident_facts_refresh_review_without_old_worker_overwriting():
+    entered,release=threading.Event(),threading.Event()
+    def post(url,headers,body,timeout):
+        facts=json.loads(json.loads(body)["contents"][0]["parts"][0]["text"].rsplit("FACTS:\n",1)[-1])
+        if facts['status']=='dispatched':entered.set();release.wait(2)
+        return gemini_reply(f"Recorded state is {facts['status']} at a simulated location.")(url,headers,body,timeout)
+    provider=GeminiBriefing('fake','model',post=post)
+    try:
+        provider.request_async('id',FACTS);assert entered.wait(1)
+        provider.request_async('id',{**FACTS,'status':'resolved'})
+        assert 'resolved' in wait_review(provider,'id')['text']
+    finally:release.set()
+    threading.Event().wait(.05)
+    assert 'resolved' in provider.result('id')['text']
+
+
+def test_review_failure_cooldown_and_explicit_read_retry():
+    elapsed=[0.0];calls=[]
+    def post(*args):calls.append(args);raise urllib.error.HTTPError('https://example.invalid',404,'secret',{},None)
+    provider=GeminiBriefing('secret','model',post=post,monotonic=lambda:elapsed[0])
+    provider.request_async('id',FACTS)
+    out=wait_review(provider,'id')
+    assert out['status']=='failed' and 'GEMINI_MODEL' in out['reason'] and 'secret' not in json.dumps(out)
+    assert out['retry_after_s']==30
+    provider.request_async('id',FACTS);assert len(calls)==1
+    elapsed[0]=31;provider.request_async('id',FACTS)
+    wait_review(provider,'id');assert len(calls)==2
+
+
+def test_cancelled_history_can_generate_review(settings,clock):
+    settings.gemini_api_key='fake';h=Harness(settings,clock)
+    try:
+        h.svc.ai_briefing._post=gemini_reply('The request was cancelled before dispatch at a simulated location.')
+        iid=h.request_help(h.start()).json()['incident']['id']
+        h.client.post(f'/api/incidents/{iid}/cancel')
+        h.client.get(f'/api/incidents/{iid}/briefing')
+        assert wait_review(h.svc.ai_briefing,iid)['status']=='ready'
+        assert h.client.get(f'/api/incidents/{iid}/briefing').json()['ai_review']['timing']
+    finally:h.close()
+
+
+def test_incident_review_allows_slow_provider_and_reports_distinct_failures():
+    def slow_success(url, headers, body, timeout):
+        assert timeout == 45.0
+        return gemini_reply("Recorded handoff at a simulated location.")(url, headers, body, timeout)
+    assert GeminiBriefing("secret", "model", post=slow_success).generate(FACTS)["status"] == "ready"
+    for error, expected in ((TimeoutError("secret"), "too long"),
+                            (urllib.error.URLError(TimeoutError("secret")), "too long"),
+                            (urllib.error.URLError("secret"), "Could not connect")):
+        def fail(*args):
+            raise error
+        result = GeminiBriefing("secret", "model", post=fail).generate(FACTS)
+        assert result["status"] == "failed" and expected in result["reason"]
+        assert "secret" not in json.dumps(result)
+    malformed = GeminiBriefing("secret", "model", post=lambda *args: b'{"candidates": []}').generate(FACTS)
+    assert "incomplete or invalid response" in malformed["reason"]

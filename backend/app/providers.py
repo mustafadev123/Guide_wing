@@ -36,7 +36,8 @@ class DeterministicBriefing:
             "test": "TEST request injected by a developer control.",
         }[incident.request_source]
         lines = [
-            f"Help request from a GuideWing user (simulated demo journey). Status: {incident.status}.",
+            "Help request from a GuideWing user (simulated demo journey).",
+            f"Status: {incident.status}.",
             how,
             where,
             f"Requested at {incident.created_at}.",
@@ -47,7 +48,9 @@ class DeterministicBriefing:
             lines.append(f"Accepted at {incident.acknowledged_at} by {incident.responder}.")
         if incident.cancelled_at:
             lines.append(f"Cancelled by the user at {incident.cancelled_at}.")
+        if incident.resolved_at:
+            lines.append(f"Resolved at {incident.resolved_at}.")
         if incident.snapshot_url:
             lines.append("A blurred camera snapshot is attached.")
-        return {"provider": self.name, "text": " ".join(lines)}
+        return {"provider": self.name, "text": "\n".join(lines)}
 

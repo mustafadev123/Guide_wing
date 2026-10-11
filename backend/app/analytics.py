@@ -12,6 +12,8 @@ import re
 import threading
 import time
 import urllib.error
+from decimal import Decimal
+from statistics import median
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal
@@ -44,6 +46,12 @@ class AggregateFacts(BaseModel):
     resolved_sample: int
 
 
+class ReportSections(BaseModel):
+    overview: str
+    response_times: str
+    next_check: str
+
+
 class SummaryResult(BaseModel):
     job_id: str
     status: Literal["pending", "ready", "not_configured", "empty", "failed", "rejected"]
@@ -56,6 +64,7 @@ class SummaryResult(BaseModel):
     scope: str = "Latest 500 stored requests, filtered by creation time"
     metrics: AggregateFacts
     text: str | None = None
+    sections: ReportSections | None = None
     reason: str | None = None
     cached: bool = False
     retry_after_s: int = 0
@@ -96,6 +105,50 @@ def aggregate(incidents: list[Incident], selection: SummaryRequest, now: datetim
     )
 
 
+def analysis_context(incidents: list[Incident], selection: SummaryRequest, now: datetime,
+                     metrics: AggregateFacts) -> dict:
+    """Additional anonymous facts for interpretation, never AI-computed arithmetic."""
+    start = now - timedelta(hours=24 if selection.range == "day" else 168) if selection.range != "loaded" else None
+    selected = [i for i in incidents if (selection.include_tests or not i.is_test)
+                and (created := _date(i.created_at)) is not None and created <= now
+                and (start is None or created >= start)]
+
+    def timing(first: str, last: str, average: float | None) -> dict:
+        samples = []
+        for incident in selected:
+            begin, end = _date(getattr(incident, first)), _date(getattr(incident, last))
+            if begin and end and (seconds := (end - begin).total_seconds()) >= 0 and math.isfinite(seconds):
+                samples.append(seconds)
+        middle = round(median(samples), 1) if samples else None
+        longest = round(max(samples), 1) if samples else None
+        return {"sample": len(samples), "mean_seconds": average,
+                "mean_minutes": round(average / 60, 1) if average is not None else None,
+                "median_seconds": middle, "median_minutes": round(middle / 60, 1) if middle is not None else None,
+                "slowest_seconds": longest, "slowest_minutes": round(longest / 60, 1) if longest is not None else None}
+
+    cancelled = [i for i in selected if i.status == "cancelled"]
+    return {
+        "open_requests": sum(metrics.counts[s] for s in ("pending", "dispatched", "acknowledged")),
+        "resolved_share_percent": round(metrics.counts["resolved"] / metrics.total * 100, 1) if metrics.total else None,
+        "cancelled_share_percent": round(len(cancelled) / metrics.total * 100, 1) if metrics.total else None,
+        "cancelled_before_dispatch": sum(not i.dispatched_at for i in cancelled),
+        "cancelled_after_dispatch": sum(bool(i.dispatched_at) for i in cancelled),
+        "request_sources": {source: sum(i.request_source == source for i in selected) for source in ("button", "gesture", "test")},
+        "acceptance": timing("dispatched_at", "acknowledged_at", metrics.accepted_seconds),
+        "resolution": timing("acknowledged_at", "resolved_at", metrics.resolved_seconds),
+        "window_hours": 24 if selection.range == "day" else 168 if selection.range == "week" else None,
+        "rehearsal_focus": (
+            "Review the dispatch-to-acceptance step: rehearse noticing a dispatched request and accepting it, then compare the recorded interval."
+            if metrics.accepted_seconds is not None and (metrics.resolved_seconds is None or metrics.accepted_seconds >= metrics.resolved_seconds)
+            else "Review acceptance-to-resolution: rehearse completing a response and recording resolution, then compare the recorded interval."
+            if metrics.resolved_seconds is not None
+            else "Rehearse cancellation before and after dispatch and record the stage; cancellation reasons are not captured."
+            if cancelled
+            else "Complete a dispatch, acceptance and resolution rehearsal so each response stage has recorded timing samples."
+        ),
+    }
+
+
 class GeminiAnalytics:
     """Small text-only provider using the existing server-side HTTP transport."""
 
@@ -104,14 +157,26 @@ class GeminiAnalytics:
 
     def generate(self, facts: dict) -> dict:
         prompt = (
-            "Write concise commentary for Guide Wing's SIMULATED hackathon responder analytics. "
-            "Use ONLY the aggregate facts below. Write two or three short sentences, under 80 words. "
-            "Say 'simulated'. Do not include any numerals; the interface already shows the exact figures. "
-            "Explain the recorded queue state and whether the timing samples are limited. "
-            "Missing averages mean unavailable data, not instant responses. The range selects requests "
-            "by creation time from only the latest 500 stored requests; do not claim global totals. "
-            "Do not infer causes, identities, safety, urgency, service quality or improvement trends. "
-            "Do not give navigation, emergency, or dispatch instructions. No real assistance is connected.\n"
+            "You are reviewing Guide Wing's simulated help-request workflow for a hackathon rehearsal. "
+            "Write a useful report, under 180 words across three fields, using ONLY the supplied facts. "
+            "overview: at most two sentences. Lead with concrete total, resolved/cancelled counts or provided percentages, and "
+            "whether any requests remain open. Say 'simulated' once. Mention before/after-dispatch "
+            "cancellations or gesture/button usage when informative. Do not recite every zero status. "
+            "response_times: at most two sentences. State the actual dispatch-to-acceptance average and qualifying sample size, "
+            "then acceptance-to-resolution timing. Prefer provided minute values for long waits. "
+            "Do not repeat the median when it equals the mean. Mention the slowest only if it adds a "
+            "clear contrast; do not list every timing statistic. Use natural English, not field-name narration. "
+            "For one timing sample, clearly say it is one recorded response, not a typical service time. "
+            "Missing averages mean unavailable, not instant. "
+            "next_check: one plain-language sentence about the supplied rehearsal_focus, "
+            "linked to the recorded figures. Never compare cancellation timing with acceptance timing: "
+            "cancelled requests have no completed acceptance interval. Frame it as a check, never a cause "
+            "or a proven improvement. No numerical targets, benchmarks, forecasts or invented trends. "
+            "Use numeric values exactly as provided; do not calculate, round again, or spell numbers "
+            "out as words. Do not infer why a user cancelled or why a responder waited. Do not claim "
+            "safety, urgency, real dispatch/service quality, identities, or global totals. No navigation "
+            "or emergency instructions. Scope and TEST filters are already labeled by the interface; "
+            "do not waste the report repeating boilerplate or vague 'samples are limited' alone.\n"
             + json.dumps(facts, sort_keys=True)
         )
         body = json.dumps({
@@ -119,8 +184,9 @@ class GeminiAnalytics:
             "generationConfig": {
                 "temperature": 0.1,
                 "responseFormat": {"text": {"mimeType": "APPLICATION_JSON", "schema": {
-                    "type": "object", "properties": {"summary": {"type": "string"}},
-                    "required": ["summary"], "additionalProperties": False,
+                    "type": "object", "properties": {
+                        field: {"type": "string"} for field in ("overview", "response_times", "next_check")},
+                    "required": ["overview", "response_times", "next_check"], "additionalProperties": False,
                 }}},
             },
         }).encode()
@@ -131,7 +197,7 @@ class GeminiAnalytics:
             parts = response["candidates"][0]["content"]["parts"]
             text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
             parsed = json.loads(text)
-            summary = parsed.get("summary")
+            values = [parsed.get(field) for field in ("overview", "response_times", "next_check")]
         except urllib.error.HTTPError as exc:
             log.warning("Analytics summary HTTP error (%s)", exc.code)
             reason = {400: "Gemini rejected the summary request (HTTP 400). Check the model/API configuration or update the integration.",
@@ -144,11 +210,16 @@ class GeminiAnalytics:
         except Exception as exc:  # no exception text, request bodies, or keys in logs
             log.warning("Analytics summary failed (%s)", type(exc).__name__)
             return {"status": "failed", "reason": "Gemini did not return a usable response. Check connectivity and retry."}
-        if not isinstance(summary, str) or not summary.strip() or len(summary) > 700:
-            return {"status": "rejected", "reason": "The AI response did not match the required short summary."}
-        if "simulated" not in summary.lower() or re.search(r"\d", summary) or FORBIDDEN.search(summary):
+        if any(not isinstance(value, str) or not value.strip() or len(value) > 800 for value in values):
+            return {"status": "rejected", "reason": "The AI response did not match the required report sections."}
+        summary = "\n\n".join(value.strip() for value in values)
+        numbers = re.compile(r"(?<![\w.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?:[eE][-+]?\d+)?")
+        allowed = {Decimal(n.replace(",", "")) for n in numbers.findall(json.dumps(facts))}
+        if (len(summary) > 1800 or "simulated" not in summary.lower() or FORBIDDEN.search(summary)
+                or any(Decimal(n.replace(",", "")) not in allowed for n in numbers.findall(summary))):
             return {"status": "rejected", "reason": "The AI response failed grounding checks. Recorded metrics remain available."}
-        return {"status": "ready", "text": summary.strip()}
+        sections = ReportSections(**dict(zip(("overview", "response_times", "next_check"), (v.strip() for v in values))))
+        return {"status": "ready", "text": summary, "sections": sections}
 
 
 class AnalyticsSummaries:
@@ -169,11 +240,13 @@ class AnalyticsSummaries:
 
     def request(self, selection: SummaryRequest) -> SummaryResult:
         now = self._clock.now()
-        metrics = aggregate(self._fetch(), selection, now)
+        incidents = self._fetch()
+        metrics = aggregate(incidents, selection, now)
         # Timestamps drift while polling; cache by unchanged selected aggregate facts.
         facts = {"range": selection.range, "include_tests": selection.include_tests,
-                 "record_limit": LIMIT, "metrics": metrics.model_dump()}
-        identity = {"prompt_version": 1, "model": self.provider.model if self.provider else None, **facts}
+                 "record_limit": LIMIT, "metrics": metrics.model_dump(),
+                 "analysis": analysis_context(incidents, selection, now, metrics)}
+        identity = {"prompt_version": 2, "model": self.provider.model if self.provider else None, **facts}
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         from_at = utc_iso(now - timedelta(hours=24 if selection.range == "day" else 168)) if selection.range != "loaded" else None
         out = SummaryResult(job_id=key, status="pending", provider="gemini" if self.provider else "unavailable",

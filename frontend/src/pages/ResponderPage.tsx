@@ -14,14 +14,25 @@ interface BriefingData {
   deterministic: string;
   ai_status: string;
   ai_reason?: string;
+  ai_model?: string;
+  ai_retry_after_s?: number;
+  ai_review?: { outcome: string; timing: string } | null;
 }
 
 function Briefing({ incident }: { incident: Incident }) {
   const [b, setB] = useState<BriefingData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [retryAfter, setRetryAfter] = useState(0);
+  const [checkingStopped, setCheckingStopped] = useState(false);
+  useEffect(() => {
+    if (retryAfter <= 0) return;
+    const timer = window.setTimeout(() => setRetryAfter(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [retryAfter]);
   useEffect(() => {
     let alive = true;
-    setB(null); setError(null);
+    setB(null); setError(null); setCheckingStopped(false); setRetryAfter(0);
     let timer: number | undefined;
     const load = (tries: number) =>
       api
@@ -29,29 +40,36 @@ function Briefing({ incident }: { incident: Incident }) {
         .then((d) => {
           if (!alive) return;
           setB(d as BriefingData);
+          setRetryAfter((d as BriefingData).ai_retry_after_s ?? 0);
           // AI summary is generated asynchronously; check back briefly while pending.
-          if ((d as BriefingData).ai_status === "pending" && tries < 15) timer = window.setTimeout(() => load(tries + 1), 2000);
+          if ((d as BriefingData).ai_status === "pending" && tries < 30) timer = window.setTimeout(() => load(tries + 1), 2000);
+          else if ((d as BriefingData).ai_status === "pending") setCheckingStopped(true);
         })
-        .catch(() => alive && setError("Briefing unavailable. The recorded facts below remain usable."));
+        .catch(() => { if (alive) { setError("AI review status unavailable. Check again when connected; recorded details remain available."); setCheckingStopped(true); } });
     load(0);
     return () => {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [incident.id, incident.version]);
-  if (!b) return <p className="hint">{error ?? "Loading recorded briefing?"}</p>;
+  }, [incident.id, incident.version, attempt]);
+  if (!b) return <div><p className="hint">{error ?? "Loading AI response review..."}</p>{error && <button className="btn" onClick={() => setAttempt(value => value + 1)}>Check AI review</button>}</div>;
   return (
     <div className="briefing">
       {b.provider === "gemini" ? (
         <>
-          <p>
-            <strong>AI summary (Gemini, from recorded facts only):</strong> {b.text}
-          </p>
-          <p className="hint">Recorded facts: {b.deterministic}</p>
+          <p className="eyebrow">Gemini response review{b.ai_model ? ` / ${b.ai_model}` : ""}</p>
+          {b.ai_review ? <div className="analytics-report">
+            <div><h4>What the timeline shows</h4><p>{b.ai_review.outcome}</p></div>
+            <div><h4>Response pattern</h4><p>{b.ai_review.timing}</p></div>
+          </div> : <p>{b.text}</p>}
+          <p className="hint">AI interpretation of this recorded request. A resolved label does not independently verify assistance.</p>
         </>
       ) : (
-        <><p>{b.deterministic ?? b.text}</p><p className="hint">Recorded briefing / {b.ai_status === "pending" ? "AI summary generating." : "AI summary unavailable or not configured. Recorded facts are used."}</p></>
+        <p className="hint">{b.ai_status === "pending" ? "Gemini is reviewing this response timeline..." : b.ai_reason ?? (b.ai_status === "not_requested" ? "AI review becomes available after dispatch or when a request closes." : "AI review unavailable. Recorded details remain available.")}</p>
       )}
+      {error && <p className="warn">{error}</p>}
+      {(b.ai_status === "failed" || b.ai_status === "rejected" || checkingStopped) && <button className="btn" disabled={retryAfter > 0} onClick={() => setAttempt(value => value + 1)}>{retryAfter > 0 ? `Retry in ${retryAfter}s` : b.ai_status === "pending" ? "Check AI review" : "Retry AI review"}</button>}
+      <details className="briefing-source"><summary>Source facts (recorded)</summary><p className="briefing-facts">{b.deterministic ?? b.text}</p></details>
     </div>
   );
 }

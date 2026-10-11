@@ -105,9 +105,13 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
       <div aria-live="polite" aria-atomic="true">
         {!configuration && !error && <p>Checking Gemini setup...</p>}
         {configuration && !configuration.configured && <p>Gemini is not configured. Add the server API key to Guide_wing/.env and restart the backend, then check setup.</p>}
-        {configuration?.configured && !report && <p>Generate a short interpretation of this selection. Only aggregate counts and timings are sent to Gemini.</p>}
+        {configuration?.configured && !report && <p>Review queue outcomes, response times, and a focused check for your next rehearsal. Only aggregate counts and timings are sent to Gemini.</p>}
         {pending && <p>Generating from the recorded snapshot. Journey and help controls remain available.</p>}
-        {report?.status === "ready" && <p className="ai-generated">{report.text}</p>}
+        {report?.status === "ready" && (report.sections ? <div className="analytics-report">
+          <div><h4>Queue outcomes</h4><p className="ai-generated">{report.sections.overview}</p></div>
+          <div><h4>Response times</h4><p className="ai-generated">{report.sections.response_times}</p></div>
+          <div><h4>Next rehearsal check</h4><p className="ai-generated">{report.sections.next_check}</p></div>
+        </div> : <p className="ai-generated">{report.text}</p>)}
         {report && !["ready", "pending"].includes(report.status) && <p>{report.reason} {report.retry_after_s > 0 ? `Retry after about ${report.retry_after_s} seconds.` : ""}</p>}
         {error && <p className="warn">{error}</p>}
       </div>
