@@ -27,6 +27,7 @@ GuideWing explores a personal campus companion for blind, low-vision and older p
 | Responder analytics and Gemini summaries | **Implemented and verified** (metrics checked against the database; real Gemini calls succeeded) |
 | Gemini response review for individual incidents | **Implemented**; live-verified by a teammate on synthetic data, not re-verified on this machine |
 | ElevenLabs server voice | **Implemented, unverified.** No ElevenLabs key has been used; browser speech is the fallback |
+| iMessage companion via **Photon Spectrum** (text `help`, `cancel`, `status`…, receive the same updates) | **Implemented and tested against the real backend** (12 agent tests). Live iPhone test pending |
 | Screen-reader (NVDA/Narrator/TalkBack) behavior | **Unverified** |
 | Native phone app, headphone audio, closed-fist or other cancel gestures | **Planned / not implemented** |
 | Real drone flight, real GPS or device location | **Not implemented.** Journey and location are simulated |
@@ -52,6 +53,13 @@ All pages are served by the backend on one port (default `http://127.0.0.1:8000`
 - If two responders accept the same request, one sees "Server confirmed" and the other "Already handled".
 
 **`/sim`: 2D simulation.** A backend-connected 2D route with the participant and companion. It polls the same state the backend owns and never moves the route itself. It shows a disconnection warning when the backend stops responding.
+
+**iMessage companion (Photon Spectrum).** A registered iPhone texts the assigned Photon iMessage line:
+- **Commands:** `start`, `help`, `cancel`, `status`, `pause`/`resume`, `repeat`.
+- **Updates:** it receives the same updates the `/user` page announces (request started, sent, accepted, cancelled, resolved, obstruction), each exactly once, whichever channel caused them.
+- **Responder view:** requests show as "iMessage" on the responder desk.
+
+Setup and details: [docs/IMESSAGE_AGENT.md](docs/IMESSAGE_AGENT.md).
 
 **`/dev`: developer controls.** Reset the demo journey, inject **TEST** obstruction or palm observations, open **MOCK** state fixtures, view vision status and copy the current journey ID. TEST, MOCK and REPLAY inputs are labeled on every page and are never presented as live detection.
 
@@ -111,6 +119,7 @@ Exact field names, statuses and endpoints are in [docs/CONTRACT.md](docs/CONTRAC
 | Object detection | **Ultralytics YOLO26n** (8.4.175, pretrained COCO weights) on PyTorch 2.14 CPU: chairs as obstructions, people as overlays only |
 | Hand gesture | **MediaPipe Tasks Gesture Recognizer** (1.1.0, `gesture_recognizer.task`): the `Open_Palm` category |
 | Frontend | React 19.3, TypeScript 6.0, Vite 8.3 (portable Node 24 inside `tools/`) |
+| Messaging | **Photon Spectrum** (`spectrum-ts` 12.10, MIT) on Node 24, hosted iMessage lines (no Mac needed) |
 | Optional services | Google **Gemini** Developer API (`gemini-3.8-flash` default); **ElevenLabs** text-to-speech (implemented, unverified) |
 | Camera bridge | DroidCam (phone app plus Windows client, USB) |
 
@@ -214,6 +223,7 @@ Detailed history: [docs/PROGRESS.md](docs/PROGRESS.md) and [docs/HANDS_ON_TEST_C
 - **Counts, rates and durations are computed by application code** from stored records (the latest 500 requests): totals, status counts, and average dispatch-to-acceptance and acceptance-to-resolution times. Cancelled requests are never counted as resolved, and missing timings show as "No qualifying records", not zero.
 - **Gemini summarizes metrics it is given; it does not produce them.** The Summary receives aggregate counts and timings only: no incident IDs, names, locations, timelines, images or raw records. It does not decide urgency, dispatch or anything about crime. The backend rejects output with numbers that don't appear in the supplied facts, which reduces fabrication but doesn't prove accuracy.
 - **Incident response review (optional):** Gemini receives the input method, status, location source, timeline event types and times, and computed elapsed seconds for one request. Coordinates, landmarks, responder identity, IDs and image content are excluded.
+- **Photon Spectrum (iMessage agent):** the update texts and the iPhone number pass through Photon's cloud. The agent never sends coordinates, images or responder identity, and its logs mask phone numbers.
 - **ElevenLabs (optional, unverified):** if configured, the text of a `/user` message is sent to ElevenLabs and the audio cached locally. Any failure falls back to browser speech.
 - **Keys stay on the server** (in `.env`). They never appear in the web bundle or API responses.
 - **The Summary never depends on Gemini answering:** the moment you click Generate, the panel shows a summary written by the application from the same figures. If Gemini answers (usually 12–20 s), its wording replaces it. Timeouts and temporary HTTP 5xx errors are retried once in the background; if Gemini still fails, the application's summary simply stays, with no error message. Metrics, Help, Cancel and responder actions never wait for Gemini. AI results are kept in memory only.
@@ -256,12 +266,13 @@ backend/app/         FastAPI app, lifecycle services, SQLite, schemas, analytics
 backend/app/vision/  camera opening, capture/inference worker, gesture and obstruction timing rules
 backend/tests/       pytest suites (controlled clock)
 frontend/src/        React pages: user, responder (with analytics), sim, dev
-scripts/             setup, start/stop, environment and camera checks, end-to-end and browser checks
+imessage-agent/      iMessage companion: Photon Spectrum wiring, command/update core, tests
+scripts/             setup, start/stop (backend and iMessage agent), environment and camera checks, end-to-end and browser checks
 docs/                contract, architecture, frontend, Gemini analytics, demo runbooks, limitations, progress
 models/              downloaded model files (git-ignored)
 ```
 
-Useful docs: [CONTRACT](docs/CONTRACT.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [FRONTEND](docs/FRONTEND.md) · [GEMINI_ANALYTICS](docs/GEMINI_ANALYTICS.md) · [LIMITATIONS](docs/LIMITATIONS.md) · [SUBMISSION_CHECKLIST](docs/SUBMISSION_CHECKLIST.md). Agent orientation: [AGENTS.md](AGENTS.md).
+Useful docs: [CONTRACT](docs/CONTRACT.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [FRONTEND](docs/FRONTEND.md) · [GEMINI_ANALYTICS](docs/GEMINI_ANALYTICS.md) · [IMESSAGE_AGENT](docs/IMESSAGE_AGENT.md) · [LIMITATIONS](docs/LIMITATIONS.md) · [SUBMISSION_CHECKLIST](docs/SUBMISSION_CHECKLIST.md). Agent orientation: [AGENTS.md](AGENTS.md).
 
 **Third-party components**
 

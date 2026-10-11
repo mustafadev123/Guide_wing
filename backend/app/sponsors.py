@@ -232,7 +232,7 @@ def incident_facts(detail) -> dict:
     return {
         "request": "help request from a GuideWing user on a simulated demo journey",
         "status": detail.status,
-        "requested_via": {"gesture": "held open-palm gesture", "button": "Help button", "test": "developer TEST control"}[
+        "requested_via": {"gesture": "held open-palm gesture", "button": "Help button", "test": "developer TEST control", "imessage": "iMessage text"}[
             detail.request_source
         ],
         "location": {"source": loc.source},

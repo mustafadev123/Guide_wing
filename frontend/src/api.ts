@@ -4,7 +4,7 @@ export type LocationSource = "simulated" | "device" | "unavailable";
 export type JourneyStatus = "idle" | "active" | "paused" | "ended";
 export type IncidentStatus = "pending" | "dispatched" | "acknowledged" | "cancelled" | "resolved";
 export type InputMode = "live" | "replay" | "test" | "unavailable";
-export type RequestSource = "gesture" | "button" | "test";
+export type RequestSource = "gesture" | "button" | "test" | "imessage";
 
 export interface Location {
   source: LocationSource;

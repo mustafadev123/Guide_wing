@@ -136,7 +136,7 @@ def analysis_context(incidents: list[Incident], selection: SummaryRequest, now: 
         "cancelled_share_percent": round(len(cancelled) / metrics.total * 100, 1) if metrics.total else None,
         "cancelled_before_dispatch": sum(not i.dispatched_at for i in cancelled),
         "cancelled_after_dispatch": sum(bool(i.dispatched_at) for i in cancelled),
-        "request_sources": {source: sum(i.request_source == source for i in selected) for source in ("button", "gesture", "test")},
+        "request_sources": {source: sum(i.request_source == source for i in selected) for source in ("button", "gesture", "imessage", "test")},
         "acceptance": timing("dispatched_at", "acknowledged_at", metrics.accepted_seconds),
         "resolution": timing("acknowledged_at", "resolved_at", metrics.resolved_seconds),
         "window_hours": 24 if selection.range == "day" else 168 if selection.range == "week" else None,
@@ -177,6 +177,7 @@ def instant_sections(facts: dict) -> ReportSections | None:
     sources = a["request_sources"]
     used = [label for n, label in ((sources["gesture"], _plural(sources["gesture"], "open-palm gesture")),
                                    (sources["button"], _plural(sources["button"], "Help button press", "Help button presses")),
+                                   (sources["imessage"], _plural(sources["imessage"], "iMessage text")),
                                    (sources["test"], _plural(sources["test"], "developer test request"))) if n]
     if used:
         parts.append("Requests came from " + (", ".join(used[:-1]) + " and " + used[-1] if len(used) > 1 else used[0]) + ".")

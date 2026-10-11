@@ -235,3 +235,28 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
   - **Invalid-key server:** real HTTP 400 from Google, summary visible in the browser after **84 ms** with no error text
   - **Real server with the key:** instant at 0.03 s, Gemini text after 12.1 s
 
+## 2026-10-11: iMessage companion via Photon Spectrum (branch `imessage-agent`, uncommitted)
+
+- **New `imessage-agent/`** (TypeScript on the project's Node 24, `spectrum-ts` 12.10.1; Bun not needed):
+  - `agent.ts`: commands, allowlist, each update sent once
+  - `guidewing.ts`: REST and `/ws/events` client with reconnection
+  - `messages.ts`: wording
+  - `main.ts`: Spectrum iMessage, or `--terminal` for development
+- **Backend:** additive request source `imessage` (schema, briefing, Gemini facts, analytics source counts, responder labels).
+- **Launcher:** `scripts/start_imessage_agent.ps1` / `stop_imessage_agent.ps1`, with PID and log handling like the backend launcher.
+- **Docs:** [IMESSAGE_AGENT.md](IMESSAGE_AGENT.md); README and CONTRACT updated.
+- **Verified:**
+  - backend pytest **93 passed** (new: `imessage` source accepted, labeled, idempotent)
+  - frontend build pass
+  - agent **10 unit tests** (commands, allowlist, event/reply race sends once, reconnect resync, cancel rules, obstacle announce flag, server-down message, masked logs)
+  - **2 integration tests against the real backend** (start → help → dispatched → accepted → resolved, each texted exactly once; redelivered message no duplicate; cancel inside the window stays cancelled; unregistered number refused)
+  - strict TypeScript against the real `spectrum-ts` types
+  - startup guards refuse without an allowlist or Photon credentials
+- **Pending (needs Photon account + iPhone):** a live iMessage round trip on the assigned line.
+- **Live test findings:**
+  - The Photon credentials authenticate (`npm run check`, about 0.5 s).
+  - Photon gates senders: an unregistered number gets Photon's "add your number under project → users" reply, and the agent receives nothing.
+  - Free-tier shared lines can change: first +1 646-279-2668, then +1 717-481-1829.
+- **First live `status` reached the agent** (06:52:22) and was answered. The agent then **looped**, answering non-text events with a "text only" message. It was stopped immediately.
+- **Loop fix:** non-text and own messages are ignored, and `SendLimiter` caps sends at 4 per 10 s and 15 per minute per conversation. Agent tests are now **13/13** (11 unit + 2 against the real backend).
+

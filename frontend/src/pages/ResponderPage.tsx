@@ -86,7 +86,7 @@ function IncidentCard({ incident, onAction, busy }: { incident: Incident; onActi
       </h3>
       <dl className="facts">
         <dt>Requested via</dt>
-        <dd>{{ gesture: "Open-palm gesture (camera)", button: "Help button", test: "Developer test control" }[incident.request_source]}</dd>
+        <dd>{{ gesture: "Open-palm gesture (camera)", button: "Help button", test: "Developer test control", imessage: "iMessage text" }[incident.request_source]}</dd>
         <dt>Location source</dt>
         <dd>{incident.location.source === "simulated" ? "Simulated (demo route)" : incident.location.source}</dd>
         <dt>Landmark / position</dt>
@@ -191,7 +191,7 @@ export function ResponderPage() {
     {tab === "analytics" ? <AnalyticsPanel incidents={incidents} lastOk={list.lastOk} stale={!!list.error || stale} /> : <div className="desk-grid"><section className="request-list" aria-label={tab === "active" ? "Active requests" : "Closed requests"}>
       <h2>{tab === "active" ? "Requests needing attention" : "Closed requests"}</h2>
       {shown.length === 0 && <p className="empty-state">{list.lastOk === null ? "Loading recorded requests?" : tab === "active" ? "No active requests. Incoming help will appear here." : "No closed requests in the latest 500 records."}</p>}
-      {shown.map(i => <button key={i.id} className={`queue-item ${selected?.id === i.id ? "selected" : ""}`} onClick={() => setSelectedId(i.id)} aria-pressed={selected?.id === i.id}><span className={`badge s-${i.status}`}>{i.status}{i.is_test ? " \u00b7 TEST" : ""}</span><strong>Near {i.location.landmark ?? "unknown landmark"}</strong><span>{i.request_source === "gesture" ? "Open palm" : i.request_source === "test" ? "Developer test" : "Help button"} &middot; {formatTime(i.created_at)}</span></button>)}
+      {shown.map(i => <button key={i.id} className={`queue-item ${selected?.id === i.id ? "selected" : ""}`} onClick={() => setSelectedId(i.id)} aria-pressed={selected?.id === i.id}><span className={`badge s-${i.status}`}>{i.status}{i.is_test ? " \u00b7 TEST" : ""}</span><strong>Near {i.location.landmark ?? "unknown landmark"}</strong><span>{i.request_source === "gesture" ? "Open palm" : i.request_source === "test" ? "Developer test" : i.request_source === "imessage" ? "iMessage" : "Help button"} &middot; {formatTime(i.created_at)}</span></button>)}
     </section><section className="request-detail" aria-label="Selected request">{selected ? <IncidentCard key={selected.id} incident={selected} onAction={act} busy={busy || !!list.error || stale} /> : <div className="detail-empty"><p className="eyebrow">Every request is a person</p><h2>Ready to listen.</h2><p>Select a request to see recorded context and available actions.</p></div>}</section></div>}
     <p className="hint">Showing the latest 500 stored requests at most. {incidents.length === 500 ? "Older requests may be omitted." : ""} Location is simulated unless explicitly labeled otherwise.</p>
   </main></>;

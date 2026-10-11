@@ -1,0 +1,21 @@
+{
+  "name": "guidewing-imessage-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GuideWing companion in iMessage via Photon Spectrum",
+  "scripts": {
+    "start": "node src/main.ts",
+    "start:terminal": "node src/main.ts --terminal",
+    "check": "node src/check.ts",
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "spectrum-ts": "12.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "typescript": "6.0.3"
+  }
+}

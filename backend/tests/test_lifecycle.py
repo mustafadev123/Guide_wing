@@ -240,3 +240,13 @@ def test_reconnect_state_retrieval(h):
 
 def test_unknown_incident_404(h):
     assert h.client.post("/api/incidents/nope/cancel").status_code == 404
+
+
+def test_imessage_request_source_is_accepted_and_labeled(h):
+    jid = h.start()
+    r = h.request_help(jid, key="imessage-msg-0001", source="imessage")
+    assert r.status_code == 201
+    inc = r.json()["incident"]
+    assert inc["request_source"] == "imessage" and inc["is_test"] is False
+    assert "iMessage" in h.client.get(f"/api/incidents/{inc['id']}/briefing").json()["deterministic"]
+    assert h.request_help(jid, key="imessage-msg-0001", source="imessage").status_code == 200  # same message id: same request

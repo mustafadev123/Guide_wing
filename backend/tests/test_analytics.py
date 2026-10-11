@@ -207,7 +207,7 @@ def test_interpretation_facts_use_recorded_sources_cancel_stage_and_timing_distr
     selection = SummaryRequest()
     metrics = aggregate(rows, selection, clock.now())
     context = analysis_context(rows, selection, clock.now(), metrics)
-    assert context["request_sources"] == {"button": 2, "gesture": 2, "test": 0}
+    assert context["request_sources"] == {"button": 2, "gesture": 2, "imessage": 0, "test": 0}
     assert context["cancelled_before_dispatch"] == context["cancelled_after_dispatch"] == 1
     assert context["resolved_share_percent"] == context["cancelled_share_percent"] == 50
     assert context["open_requests"] == 0
