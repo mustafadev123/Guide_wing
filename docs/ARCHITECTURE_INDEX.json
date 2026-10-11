@@ -153,13 +153,14 @@
         "docs/fixtures/mock-obstacle.json": "4d6d85692392b6e9b6f6c885937e5bba7ba5a9f450a5e08495356d604b3d9604",
         "docs/fixtures/mock-paused.json": "e65ef003e12132bb67eba76b2c347ad2f2c4175a37b8507068ef64add63db058",
         "docs/fixtures/mock-pending.json": "4990f4cf912675350b7c47b1b88608c5ce4da24124bf1e6e39f69f4aea1633be",
-        "docs/fixtures/mock-resolved.json": "60327ec3f544f65670c12037cbc3fccf9e73eb1d54fffb97f9de6f944f001445"
+        "docs/fixtures/mock-resolved.json": "60327ec3f544f65670c12037cbc3fccf9e73eb1d54fffb97f9de6f944f001445",
+        "docs/JUDGE_QUESTIONS.md": "79559950326d609bff279ec77b7b647f9d8a10ebaa9cb3e2d53ade90db572a10"
       }
     },
     "reference": {
       "files": {
         "AGENTS.md": "6ab516e4bc47e6e507a4e50953b82b9f721019c240cc788f1163218901ba3066",
-        "docs/ARCHITECTURE.md": "476fe1f2d498464554e0e481149b9a330954a9244bb0fb2140027a41fad67663",
+        "docs/ARCHITECTURE.md": "1482e6d85baa920d6264904fdb4a5426e3c0f5bc74d4ed8911c3c611525edeb4",
         "scripts/check_architecture_index.py": "1f5bbc74fb0cb63300cb30ed669ef4ab819fc36277cbaa0a5ad92bd53bb4b04e"
       }
     }
