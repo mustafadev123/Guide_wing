@@ -51,6 +51,14 @@ The SHA-256 job identity includes prompt version (now 2), model, selection, metr
 
 ## Failure and rehearsal
 
+**Since 2026-10-11 (branch `summary-fallback`):**
+- Every summary response carries `instant_sections`: a two-part summary (queue outcomes, response times) written by `analytics.instant_sections()` from the same server-computed figures. It is returned immediately and is present for `pending`, `ready`, `failed`, `rejected` and `not_configured`; it is `null` only for an empty selection.
+- The responder panel (title "Summary") shows it at once and replaces it with Gemini's sections when the job becomes `ready`.
+- Timeouts, network errors and HTTP 5xx get **one quiet retry** after 2 s. HTTP 4xx and rejected output are not retried.
+- The browser polls for up to 90 s, then stops silently.
+- The panel no longer shows provider errors, retry buttons, setup instructions or a missing-key message; the reasons below remain in the API response and the server log for diagnosis.
+
+
 - Missing key: disabled Generate and local setup instructions. **Check setup** rereads configuration after restart; no Gemini call.
 - Key rejected or API access denied: check the key's project and permissions, edit `.env`, restart.
 - Model unavailable: set `GEMINI_ANALYTICS_MODEL` to an accessible structured-output model and restart.

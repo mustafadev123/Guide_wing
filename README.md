@@ -216,7 +216,7 @@ Detailed history: [docs/PROGRESS.md](docs/PROGRESS.md) and [docs/HANDS_ON_TEST_C
 - **Incident response review (optional):** Gemini receives the input method, status, location source, timeline event types and times, and computed elapsed seconds for one request. Coordinates, landmarks, responder identity, IDs and image content are excluded.
 - **ElevenLabs (optional, unverified):** if configured, the text of a `/user` message is sent to ElevenLabs and the audio cached locally. Any failure falls back to browser speech.
 - **Keys stay on the server** (in `.env`). They never appear in the web bundle or API responses.
-- **Failures don't block help:** timeouts, quota errors and temporary HTTP 503 responses appear as messages with a retry. Metrics, Help, Cancel and responder actions keep working. AI results are kept in memory only.
+- **The Summary never depends on Gemini answering:** the moment you click Generate, the panel shows a summary written by the application from the same figures. If Gemini answers (usually 12–20 s), its wording replaces it. Timeouts and temporary HTTP 5xx errors are retried once in the background; if Gemini still fails, the application's summary simply stays, with no error message. Metrics, Help, Cancel and responder actions never wait for Gemini. AI results are kept in memory only.
 
 Details: [docs/GEMINI_ANALYTICS.md](docs/GEMINI_ANALYTICS.md).
 

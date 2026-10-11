@@ -222,3 +222,16 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
 - demo video and screenshots
 - rotate the Gemini key after the event (it was shared in a chat)
 - the architecture index reports drift, partly from Windows line endings, and was not rebaselined
+
+## 2026-10-11: Summary fallback (branch `summary-fallback`)
+
+- **Dry run before recording** (server event log): every flow worked, including a **live palm request → dispatched → accepted → resolved**, button flows and cancel before/after dispatch. 2 of 3 Gemini summaries succeeded; one timed out after 40 s.
+- **Fix:**
+  - The backend returns an **instant summary** written from the recorded figures with every response, and retries transient Gemini failures once.
+  - The panel shows the instant summary immediately and swaps in Gemini's text when ready. No error, retry or setup text is shown.
+- **Verified:**
+  - pytest **92 passed** (3 new: instant summary always present and exact; 503 retried once then ready; 401 not retried)
+  - TypeScript/build pass; Node 5/5; browser check **46/46** (no-key server)
+  - **Invalid-key server:** real HTTP 400 from Google, summary visible in the browser after **84 ms** with no error text
+  - **Real server with the key:** instant at 0.03 s, Gemini text after 12.1 s
+

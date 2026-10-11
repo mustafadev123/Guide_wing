@@ -17,6 +17,11 @@ GOOD = "The simulated queue includes recorded help requests. Read the response t
 
 
 @pytest.fixture(autouse=True)
+def no_retry_delay(monkeypatch):
+    monkeypatch.setattr(AnalyticsSummaries, "TRANSIENT_RETRY_DELAY_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def analytics_clock(clock):
     """Place the injected clock after this module's synthetic record timestamps."""
     clock.advance((datetime(2026, 10, 10, 12, tzinfo=timezone.utc) - clock.now()).total_seconds())
@@ -152,10 +157,10 @@ def test_failure_retry_cooldown_and_ready_expiry(clock):
     elapsed[0] += 901
     finished(manager, manager.request(SummaryRequest()).job_id)
     manager.request(SummaryRequest())
-    assert len(calls) == 3
+    assert len(calls) == 4  # timeout -> one quiet retry, then cooldown (no new call)
     elapsed[0] += 31
     finished(manager, manager.request(SummaryRequest()).job_id)
-    assert len(calls) == 4
+    assert len(calls) == 6
 
 
 def test_api_off_and_unknown_jobs_do_not_leak_configuration(h):
@@ -241,3 +246,43 @@ def test_interpretation_change_invalidates_cache_when_primary_counts_and_means_m
     rows[0].request_source = "button"
     second = manager.request(SummaryRequest()); finished(manager, second.job_id)
     assert first.metrics == second.metrics and first.job_id != second.job_id and len(calls) == 2
+
+
+def test_instant_summary_is_always_available_and_uses_recorded_figures(clock):
+    rows = [row(),  # dispatched 01:00:10, accepted 01:00:40 (30 s), resolved 01:02:40 (120 s)
+            row(status="cancelled", dispatched_at=None, acknowledged_at=None, resolved_at=None, request_source="button")]
+    def post(*a): raise TimeoutError()
+    manager = AnalyticsSummaries(lambda: rows, clock, GeminiAnalytics("fake", "model", post=post))
+    pending = manager.request(SummaryRequest())
+    assert pending.status == "pending" and pending.instant_sections is not None  # shown immediately
+    failed = finished(manager, pending.job_id)
+    assert failed.status == "failed" and failed.instant_sections == pending.instant_sections  # still there after failure
+    text = failed.instant_sections.overview + " " + failed.instant_sections.response_times
+    assert "2 simulated requests" in text and "1 resolved (50%)" in text and "1 cancelled (50%)" in text
+    assert "no requests still open" in text and "1 happened before dispatch" in text
+    assert "1 open-palm gesture and 1 Help button press" in text
+    assert "30 seconds for the one recorded response" in text and "120 seconds (about 2 minutes)" in text
+    unconfigured = AnalyticsSummaries(lambda: rows, clock, None).request(SummaryRequest())
+    assert unconfigured.status == "not_configured" and unconfigured.instant_sections is not None
+    assert AnalyticsSummaries(lambda: [], clock, None).request(SummaryRequest()).instant_sections is None
+
+
+def test_transient_failure_is_retried_once_quietly(clock):
+    calls = []
+    def flaky(*a):
+        calls.append(a)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError("https://example.invalid", 503, "busy", {}, None)
+        return reply()
+    manager = AnalyticsSummaries(lambda: [row()], clock, GeminiAnalytics("fake", "model", post=flaky))
+    out = finished(manager, manager.request(SummaryRequest()).job_id)
+    assert out.status == "ready" and len(calls) == 2
+
+
+def test_non_transient_failure_is_not_retried(clock):
+    calls = []
+    def denied(*a):
+        calls.append(a); raise urllib.error.HTTPError("https://example.invalid", 401, "no", {}, None)
+    manager = AnalyticsSummaries(lambda: [row()], clock, GeminiAnalytics("fake", "model", post=denied))
+    out = finished(manager, manager.request(SummaryRequest()).job_id)
+    assert out.status == "failed" and len(calls) == 1 and out.instant_sections is not None

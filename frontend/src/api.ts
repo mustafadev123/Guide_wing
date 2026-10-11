@@ -135,6 +135,8 @@ export interface AnalyticsReport {
   };
   text: string | null;
   sections?: { overview: string; response_times: string; next_check: string } | null;
+  /** Written by the backend from the same figures; shown until (or instead of) the Gemini text. */
+  instant_sections?: { overview: string; response_times: string; next_check: string } | null;
   reason: string | null;
   cached: boolean;
   retry_after_s: number;

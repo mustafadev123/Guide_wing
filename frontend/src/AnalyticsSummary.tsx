@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, AnalyticsConfiguration, AnalyticsReport } from "./api";
+import { api, ApiError, AnalyticsReport } from "./api";
 import { AnalyticsMetrics, AnalyticsRange, summaryMatches } from "./analyticsMetrics";
 
 
 export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
   range: AnalyticsRange; includeTests: boolean; metrics: AnalyticsMetrics; stale: boolean;
 }) {
-  const [configuration, setConfiguration] = useState<AnalyticsConfiguration | null>(null);
   const [report, setReport] = useState<AnalyticsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,17 +14,8 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
   const epoch = useRef(0);
   const lock = useRef(false);
 
-  const checkConfiguration = async () => {
-    try {
-      const result = await api.analyticsConfiguration();
-      if (alive.current) { setConfiguration(result); setError(null); }
-    } catch {
-      if (alive.current) setError("Cannot check Gemini configuration. Reconnect and check setup again.");
-    }
-  };
   useEffect(() => {
     alive.current = true;
-    void checkConfiguration();
     return () => { alive.current = false; epoch.current++; };
   }, []);
   useEffect(() => {
@@ -39,38 +29,26 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
     if (report?.status !== "pending") return;
     const id = report.job_id;
     const requested = epoch.current;
-    const deadline = Date.now() + 45_000;
+    const deadline = Date.now() + 90_000; // provider attempt + one quiet retry
     let running = false;
     let closed = false;
     const timer = window.setInterval(async () => {
       if (running || closed) return;
-      if (Date.now() >= deadline) {
-        clearInterval(timer); setCheckAgain(true);
-        setError("The summary is still generating. Check its status without sending a new Gemini request.");
-        return;
-      }
+      if (Date.now() >= deadline) { clearInterval(timer); setCheckAgain(true); return; } // keep the instant summary
       running = true;
       try {
         const result = await api.analyticsSummary(id);
         if (!closed && alive.current && epoch.current === requested) setReport(result);
       } catch (e) {
-        if (!closed && alive.current && epoch.current === requested) {
-          clearInterval(timer);
-          if (e instanceof ApiError && e.status === 404) {
-            setReport(null); setCheckAgain(false);
-            setError("Summary unavailable after restart or cache eviction. Generate again explicitly.");
-          } else {
-            setCheckAgain(true);
-            setError("Summary status unavailable. Reconnect, then check the existing request.");
-          }
-        }
+        // Status reads failing never replace the instant summary already on screen.
+        if (!closed && alive.current && epoch.current === requested) { clearInterval(timer); setCheckAgain(true); void e; }
       } finally { running = false; }
     }, 1000);
     return () => { closed = true; clearInterval(timer); };
   }, [report?.job_id, report?.status]);
 
   const generate = async () => {
-    if (lock.current || stale || !configuration?.configured) return;
+    if (lock.current || stale) return;
     lock.current = true; setBusy(true); setError(null); setCheckAgain(false);
     const requested = ++epoch.current;
     try {
@@ -84,7 +62,7 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
       }
     } catch (e) {
       if (alive.current && epoch.current === requested) {
-        setError(e instanceof Error ? e.message : "Summary unavailable. Recorded metrics are still usable.");
+        setError("Summary unavailable while the server is unreachable. The recorded figures above are still current.");
         if (report?.status === "pending") {
           if (e instanceof ApiError && e.status === 404) { setReport(null); setCheckAgain(false); }
           else setCheckAgain(true);
@@ -96,27 +74,24 @@ export function AnalyticsSummary({ range, includeTests, metrics, stale }: {
   };
   const pending = report?.status === "pending";
   const changed = !!report && !summaryMatches(metrics, report.metrics);
-  const blocked = busy || stale || !configuration?.configured || (!pending && metrics.total === 0) || (pending && !checkAgain);
+  const blocked = busy || stale || metrics.total === 0 || (pending && !checkAgain);
+  // Gemini text when it is ready; otherwise the instant summary written from the recorded figures.
+  const shown = report?.status === "ready" && report.sections ? report.sections : report?.instant_sections ?? null;
   return <section className="ai-summary" aria-labelledby="ai-title">
     <div className="ai-summary-content">
       <h3 id="ai-title">Summary</h3>
       <div aria-live="polite" aria-atomic="true">
-        {!configuration && !error && <p>Checking Gemini setup...</p>}
-        {configuration && !configuration.configured && <p>Gemini is not configured. Add the server API key to Guide_wing/.env and restart the backend, then check setup.</p>}
-        {configuration?.configured && !report && <p>Summarize queue outcomes and response times.</p>}
-        {pending && <p>Generating from the recorded snapshot. Journey and help controls remain available.</p>}
-        {report?.status === "ready" && (report.sections ? <div className="analytics-report">
-          <div><h4>Queue outcomes</h4><p className="ai-generated">{report.sections.overview}</p></div>
-          <div><h4>Response times</h4><p className="ai-generated">{report.sections.response_times}</p></div>
-        </div> : <p className="ai-generated">{report.text}</p>)}
-        {report && !["ready", "pending"].includes(report.status) && <p>{report.reason} {report.retry_after_s > 0 ? `Retry after about ${report.retry_after_s} seconds.` : ""}</p>}
+        {!shown && <p>{metrics.total === 0 ? "No requests in this selection yet." : "Summarize queue outcomes and response times."}</p>}
+        {shown && <div className="analytics-report">
+          <div><h4>Queue outcomes</h4><p className="ai-generated">{shown.overview}</p></div>
+          <div><h4>Response times</h4><p className="ai-generated">{shown.response_times}</p></div>
+        </div>}
         {error && <p className="warn">{error}</p>}
       </div>
-      {report?.status === "ready" && changed && <p className="warn">The recorded figures have changed since this summary was requested. Generate an updated summary.</p>}
+      {shown && changed && <p className="warn">The recorded figures have changed since this summary was requested. Generate an updated summary.</p>}
     </div>
     <div className="ai-summary-actions">
-      <button className="btn" onClick={generate} disabled={!!blocked}>{busy ? "Requesting..." : pending && !checkAgain ? "Generating..." : pending ? "Check summary" : report?.status === "ready" ? changed ? "Update summary" : "Generate summary" : report?.status === "failed" || report?.status === "rejected" ? "Retry summary" : "Generate summary"}</button>
-      {(!configuration || !configuration.configured) && <button className="text-button" onClick={() => { void checkConfiguration(); }}>Check setup</button>}
+      <button className="btn" onClick={generate} disabled={!!blocked}>{busy ? "Summarizing..." : shown && changed ? "Update summary" : "Generate summary"}</button>
     </div>
   </section>;
 }

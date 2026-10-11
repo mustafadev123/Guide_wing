@@ -65,6 +65,9 @@ class SummaryResult(BaseModel):
     metrics: AggregateFacts
     text: str | None = None
     sections: ReportSections | None = None
+    # Written by application code from the same figures; always available when there are records,
+    # so the interface never depends on Gemini answering in time.
+    instant_sections: ReportSections | None = None
     reason: str | None = None
     cached: bool = False
     retry_after_s: int = 0
@@ -149,6 +152,49 @@ def analysis_context(incidents: list[Incident], selection: SummaryRequest, now: 
     }
 
 
+def _plural(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def _duration(seconds: float) -> str:
+    text = f"{seconds:g} seconds" if seconds != 1 else "1 second"
+    return f"{text} (about {round(seconds / 60, 1):g} minutes)" if seconds >= 90 else text
+
+
+def instant_sections(facts: dict) -> ReportSections | None:
+    """Deterministic two-part summary built only from server-computed figures."""
+    m, a = facts["metrics"], facts["analysis"]
+    total = m["total"]
+    if not total:
+        return None
+    counts = m["counts"]
+    parts = [f"Across {_plural(total, 'simulated request')}, {counts['resolved']} resolved"
+             f" ({a['resolved_share_percent']:g}%) and {counts['cancelled']} cancelled ({a['cancelled_share_percent']:g}%),"
+             f" with {_plural(a['open_requests'], 'request') if a['open_requests'] else 'no requests'} still open."]
+    if counts["cancelled"]:
+        parts.append(f"Of the cancellations, {a['cancelled_before_dispatch']} happened before dispatch and"
+                     f" {a['cancelled_after_dispatch']} after dispatch.")
+    sources = a["request_sources"]
+    used = [label for n, label in ((sources["gesture"], _plural(sources["gesture"], "open-palm gesture")),
+                                   (sources["button"], _plural(sources["button"], "Help button press", "Help button presses")),
+                                   (sources["test"], _plural(sources["test"], "developer test request"))) if n]
+    if used:
+        parts.append("Requests came from " + (", ".join(used[:-1]) + " and " + used[-1] if len(used) > 1 else used[0]) + ".")
+    if m["accepted_seconds"] is not None:
+        n = m["accepted_sample"]
+        timing = [f"Dispatch to acceptance took {_duration(m['accepted_seconds'])} for the one recorded response." if n == 1 else
+                  f"Dispatch to acceptance took {_duration(m['accepted_seconds'])} on average across {_plural(n, 'request')}."]
+    else:
+        timing = ["No dispatched request has been accepted in this selection yet, so there is no acceptance time to report."]
+    if m["resolved_seconds"] is not None:
+        n = m["resolved_sample"]
+        timing.append(f"Acceptance to resolution took {_duration(m['resolved_seconds'])} for the one recorded resolution." if n == 1 else
+                      f"Acceptance to resolution took {_duration(m['resolved_seconds'])} on average across {_plural(n, 'request')}.")
+    elif m["accepted_seconds"] is not None:
+        timing.append("No accepted request has been marked resolved yet.")
+    return ReportSections(overview=" ".join(parts), response_times=" ".join(timing), next_check=a["rehearsal_focus"])
+
+
 class GeminiAnalytics:
     """Small text-only provider using the existing server-side HTTP transport."""
 
@@ -206,10 +252,10 @@ class GeminiAnalytics:
                       404: "Gemini model unavailable. Check GEMINI_ANALYTICS_MODEL for this account.",
                       429: "Gemini quota or rate limit reached. Check Google AI Studio quota and retry later."}.get(
                           exc.code, f"Gemini service error (HTTP {exc.code}). Retry later.")
-            return {"status": "failed", "reason": reason}
+            return {"status": "failed", "reason": reason, "transient": exc.code >= 500}
         except Exception as exc:  # no exception text, request bodies, or keys in logs
             log.warning("Analytics summary failed (%s)", type(exc).__name__)
-            return {"status": "failed", "reason": "Gemini did not return a usable response. Check connectivity and retry."}
+            return {"status": "failed", "reason": "Gemini did not return a usable response. Check connectivity and retry.", "transient": True}
         if any(not isinstance(value, str) or not value.strip() or len(value) > 800 for value in values):
             return {"status": "rejected", "reason": "The AI response did not match the required report sections."}
         summary = "\n\n".join(value.strip() for value in values)
@@ -227,6 +273,7 @@ class AnalyticsSummaries:
     RETRY_SECONDS = 30
     MAX_ENTRIES = 64
     MAX_PENDING = 2
+    TRANSIENT_RETRY_DELAY_S = 2.0
 
     def __init__(self, fetch: Callable[[], list[Incident]], clock, provider: GeminiAnalytics | None,
                  monotonic: Callable[[], float] = time.monotonic):
@@ -251,7 +298,8 @@ class AnalyticsSummaries:
         from_at = utc_iso(now - timedelta(hours=24 if selection.range == "day" else 168)) if selection.range != "loaded" else None
         out = SummaryResult(job_id=key, status="pending", provider="gemini" if self.provider else "unavailable",
                             model=self.provider.model if self.provider else None, range=selection.range,
-                            include_tests=selection.include_tests, as_of=utc_iso(now), from_at=from_at, metrics=metrics)
+                            include_tests=selection.include_tests, as_of=utc_iso(now), from_at=from_at, metrics=metrics,
+                            instant_sections=instant_sections(facts))
         if not self.provider:
             return out.model_copy(update={"status": "not_configured", "reason": "Set GEMINI_API_KEY in Guide_wing/.env and restart the backend."})
         if not metrics.total:
@@ -279,6 +327,12 @@ class AnalyticsSummaries:
         retry = max(0, math.ceil(self.RETRY_SECONDS - (self._time() - at))) if result.status in ("failed", "rejected") else 0
         return result.model_copy(update={"cached": cached, "retry_after_s": retry}, deep=True)
 
+    def _attempt(self, facts: dict) -> dict:
+        try:
+            return self.provider.generate(facts)  # type: ignore[union-attr]
+        except Exception:
+            return {"status": "failed", "reason": "Summary provider unavailable. Retry later.", "transient": True}
+
     def get(self, key: str) -> SummaryResult:
         with self._lock:
             if key not in self._jobs:
@@ -287,10 +341,11 @@ class AnalyticsSummaries:
             return self._copy(result, at)
 
     def _run(self, key: str, facts: dict) -> None:
-        try:
-            value = self.provider.generate(facts)  # type: ignore[union-attr]
-        except Exception:
-            value = {"status": "failed", "reason": "Summary provider unavailable. Retry later."}
+        value = self._attempt(facts)
+        if value.pop("transient", False):  # timeout / network / HTTP 5xx: one quiet retry
+            time.sleep(self.TRANSIENT_RETRY_DELAY_S)
+            value = self._attempt(facts)
+            value.pop("transient", None)
         with self._lock:
             current, _ = self._jobs[key]
             self._jobs[key] = (current.model_copy(update=value), self._time())

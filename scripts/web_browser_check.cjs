@@ -216,11 +216,18 @@ const SPEECH_STUB = () => {
   const counts = all.reduce((m, i) => ((m[i.status] = (m[i.status] || 0) + 1), m), {});
   console.log("      API (non-test) counts:", JSON.stringify(counts), "total", all.length);
   console.log("      Analytics panel text:", analyticsText.replace(/\s+/g, " ").slice(0, 600));
-  const cfg = (await api("GET", "/api/analytics/config")).body;
-  if (!cfg.configured) {
-    const gen = resp1.getByRole("button", { name: /Generate summary/ });
-    check("Gemini not configured -> Generate disabled with setup guidance", (await gen.isDisabled().catch(() => true)) && /GEMINI_API_KEY|not configured|setup/i.test(analyticsText));
-  }
+  // Summary: an instant summary written from the recorded figures appears immediately, with or without
+  // Gemini; provider problems never surface as errors in this panel.
+  const gen = resp1.getByRole("button", { name: /Generate summary/ });
+  await gen.click();
+  const summaryText = await until(async () => {
+    const t = await resp1.locator(".ai-summary").innerText();
+    return /Queue outcomes/.test(t) && /Response times/.test(t) && t;
+  }, 8000);
+  check("Generate summary shows a summary within seconds (instant or Gemini)", !!summaryText, summaryText || "");
+  await resp1.waitForTimeout(3000);
+  const later = await resp1.locator(".ai-summary").innerText();
+  check("Summary panel shows no failure, retry or setup text", !/fail|error|retry|not configured|unavailable|gemini/i.test(later), later.replace(/\s+/g, " ").slice(0, 300));
   const sumResp = await api("POST", "/api/analytics/summary", { range: "loaded", include_tests: false });
   const m = sumResp.body?.metrics;
   check("Server analytics metrics match API records", m && m.total === all.length && (m.counts.resolved || 0) === (counts.resolved || 0) && (m.counts.cancelled || 0) === (counts.cancelled || 0),
