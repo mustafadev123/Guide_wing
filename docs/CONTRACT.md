@@ -34,7 +34,8 @@ pending --(10 s deadline, backend)--> dispatched --(responder accept)--> acknowl
 | POST | `/api/incidents` | `{journey_id, request_key, request_source: button\|gesture\|test\|imessage\|voice}` → `{incident, created, changed}` (201 or 200) |
 | GET | `/api/incidents?status=&journey_id=&limit=` | Newest first |
 | GET | `/api/incidents/{id}` | Includes `timeline` |
-| POST | `/api/incidents/{id}/cancel` `/accept` `/resolve` | `accept` body `{responder}` is optional |
+| POST | `/api/incidents/{id}/cancel` `/accept` `/resolve` | `accept` body `{responder}` is optional. The accept that wins also returns `responder_token` (once, only to that caller; the server stores only its SHA-256) |
+| POST | `/api/incidents/{id}/on-my-way` | `{responder_token}` from that accept. Sets `on_my_way_at` once (repeat → 200 `changed: false`); status stays `acknowledged`. 403 without the matching token, 409 unless `acknowledged` |
 | GET | `/api/incidents/{id}/snapshot` | Blurred JPEG only; 404 if none |
 | GET | `/api/incidents/{id}/briefing` | Deterministic text from recorded facts |
 | GET | `/api/analytics/config` | Safe provider/model configuration; key presence does not prove provider access |
@@ -60,11 +61,13 @@ SHA-256 job identity uses model/prompt version/selection/aggregates. Identical p
 `{boot_id, sequence, type, occurred_at, payload}`. The first message is `hello`, and `ping` arrives every 15 s when idle.
 
 - `journey.updated` `{journey}`
-- `incident.updated` `{incident, transition, previous_status}`. `transition` is one of `created`, `dispatched`, `acknowledged`, `cancelled`, `resolved` or `snapshot_attached`.
+- `incident.updated` `{incident, transition, previous_status}`. `transition` is one of `created`, `dispatched`, `acknowledged`, `cancelled`, `resolved`, `snapshot_attached` or `on_my_way` (published once; the status is unchanged).
 - `vision.obstacle` `{observation_id, state: detected|cleared, announce, source, journey_paused}`. `announce` is true only when the journey has started (active or paused). An obstruction seen before Start is published with `announce: false`, stays visible in vision status and the snapshot, and is announced once if it is still present after Start. A suppressed warning doesn't use up the cooldown.
 - `vision.status` `{vision}`
 
-Sequences are monotonic within a boot. On reconnect, on a new `boot_id` or on a sequence gap, clients must re-read REST state. Speech is deduplicated by `incident id + status` and by obstacle `observation_id`, never by connection. A refreshed page seeds its dedupe set from current state, so acknowledgment is not replayed; the user can press **Repeat** to hear it again on purpose.
+Sequences are monotonic within a boot. On reconnect, on a new `boot_id` or on a sequence gap, clients must re-read REST state. Speech is deduplicated by `incident id + status` (plus `incident id + on_my_way`), by obstacle `observation_id` and by `journey id + waypoint index` for simulated-route checkpoints, never by connection.
+
+**Additive fields (14 Oct):** `Incident.on_my_way_at` and `SnapshotIncident.on_my_way_at` (nullable, always present). No existing field changed; older databases gain the `on_my_way_at` and `responder_token_hash` columns on startup with NULL for existing rows. A refreshed page seeds its dedupe set from current state, so acknowledgment is not replayed; the user can press **Repeat** to hear it again on purpose.
 
 ## Changes from the earlier mock
 

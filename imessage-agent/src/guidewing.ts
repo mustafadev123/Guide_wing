@@ -24,7 +24,10 @@ export interface Incident {
   responder: string | null;
   snapshot_url: string | null;
   is_test: boolean;
+  /** Assigned responder reported "On my way" (a progress update; status stays acknowledged). */
+  on_my_way_at?: string | null;
 }
+export interface ActionResult { incident: Incident; changed: boolean; responder_token?: string | null }
 export interface ServerEvent {
   boot_id: string;
   sequence: number;
@@ -43,8 +46,10 @@ export class BackendError extends Error {
 /** Responder-side operations: the same endpoints the /responder desk uses. */
 export interface Backend {
   incidents(status?: IncidentStatus): Promise<Incident[]>;
-  accept(incidentId: string, responder: string): Promise<{ incident: Incident; changed: boolean }>;
-  resolve(incidentId: string): Promise<{ incident: Incident; changed: boolean }>;
+  accept(incidentId: string, responder: string): Promise<ActionResult>;
+  resolve(incidentId: string): Promise<ActionResult>;
+  /** Requires the token returned by this responder's own successful accept. */
+  onMyWay(incidentId: string, responderToken: string): Promise<ActionResult>;
 }
 
 export class GuideWingClient implements Backend {
@@ -72,10 +77,13 @@ export class GuideWingClient implements Backend {
     return this.call<Incident[]>("GET", `/api/incidents?limit=50${status ? `&status=${status}` : ""}`);
   }
   accept(incidentId: string, responder: string) {
-    return this.call<{ incident: Incident; changed: boolean }>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/accept`, { responder });
+    return this.call<ActionResult>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/accept`, { responder });
   }
   resolve(incidentId: string) {
-    return this.call<{ incident: Incident; changed: boolean }>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/resolve`);
+    return this.call<ActionResult>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/resolve`);
+  }
+  onMyWay(incidentId: string, responderToken: string) {
+    return this.call<ActionResult>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/on-my-way`, { responder_token: responderToken });
   }
 
   /** Subscribe to /ws/events. Calls onOpen after every (re)connect so the caller can resync. */

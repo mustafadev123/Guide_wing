@@ -3,6 +3,8 @@ import { api, ApiError, describeLocation, IncidentStatus, MODE_LABEL, newRequest
 import { ServerEvent, useFreshness, usePolling, useServerEvents } from "../events";
 import { Announcer, ServerThenBrowserSpeech } from "../speech";
 import { createBrowserRecognizer, requestMicrophone, VoiceCommand, VoiceController, VoiceSnapshot, VoiceState } from "../voice";
+import { CheckpointTracker } from "../checkpoints";
+import { cameraHold, cameraMessage, CameraSignal, cameraSignal, SERVER_DOWN_MESSAGE, serverHold, ServerSignal, StableSignal } from "../readiness";
 import { ConnectionBadge, ModeBadge } from "../components";
 import { Atmosphere, Entrance, Icon } from "../ui";
 
@@ -23,6 +25,7 @@ type Attempt = { journeyId: string; key: string; source?: HelpSource };
 const VOICE_STATE_LABEL: Record<VoiceState, string> = { unsupported: "Not supported", off: "Off", permission: "Asking for microphone", ready: "Ready", listening: "Listening", processing: "Processing", speaking: "Paused while GuideWing speaks", error: "Problem" };
 // Must never contain a spoken command phrase: announcements are not allowed to sound like "GuideWing, help".
 const OBSTACLE_MESSAGE = "Obstacle detected ahead. Please pause.";
+const ON_MY_WAY_MESSAGE = "Your responder says they are on the way.";
 function readStored<T>(key: string, fallback: T): T {
   try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 }
@@ -60,8 +63,11 @@ export function UserPage() {
   const lock = useRef(false);
   const submitted = useRef<string | null>(null);
   const cancellationToConfirm = useRef<string | null>(null);
-  const hadConnection = useRef(false);
-  const wasReady = useRef(false);
+  const routeNames = useRef<string[]>([]);
+  const checkpoints = useMemo(() => new CheckpointTracker(() => routeNames.current), []);
+  const server = useMemo(() => new StableSignal<ServerSignal>(serverHold), []);
+  const camera = useMemo(() => new StableSignal<CameraSignal>(cameraHold), []);
+  const prevVoice = useRef<VoiceState | null>(null);
   const attempt = useRef<Attempt | null>(readStored<Attempt | null>("guidewing.helpAttempt", null));
   const snap = usePolling<SimulationState>(async () => {
     const s = await api.snapshot();
@@ -101,12 +107,32 @@ export function UserPage() {
   }, [announcer, snap.refresh, vision.refresh]);
   const connection = useServerEvents(onEvent, () => { void snap.refresh(); void vision.refresh(); });
 
+  useEffect(() => { api.route().then(r => { routeNames.current = r.waypoints.map(w => w.name); }).catch(() => undefined); }, []);
+
+  // Readiness and failure feedback, evaluated on the 250 ms clock with hysteresis (readiness.ts).
   useEffect(() => {
-    if (hadConnection.current && wasReady.current && !ready) announcer.say("Connection unavailable. Requests and cancellations need server confirmation. Reconnect to check the current status.");
-    if (hadConnection.current && !wasReady.current && ready) announcer.say(`Connection restored. ${active ? `Request status: ${STATUS_TEXT[active.status].toLowerCase()}.` : "No active help request."}`);
-    if (ready) hadConnection.current = true;
-    wasReady.current = ready;
-  }, [ready, active, announcer]);
+    if (state || snap.error) {
+      const t = server.update(ready ? "up" : "down", now);
+      if (t?.to === "down") announcer.say(SERVER_DOWN_MESSAGE);
+      else if (t?.to === "up" && t.from === "down") announcer.say(`Connection restored. ${active ? `Request status: ${STATUS_TEXT[active.status].toLowerCase()}.` : "No active help request."}`);
+    }
+    if (v && !vision.error && server.value === "up") {
+      const t = camera.update(cameraSignal(v), now);
+      // A page refresh does not repeat the camera message it already gave in this tab.
+      const text = t && cameraMessage(t);
+      if (t && text && readStored<string | null>("guidewing.cameraAnnounced", null) !== t.to) announcer.say(text, t.to === "unavailable" ? "normal" : "optional");
+      if (text) store("guidewing.cameraAnnounced", t!.to);
+    }
+  }, [now]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Voice readiness only after the microphone was granted; failures are spoken once.
+  useEffect(() => {
+    const prev = prevVoice.current;
+    prevVoice.current = voiceSnap.state;
+    if (prev === null || prev === voiceSnap.state) return;
+    if (voiceSnap.state === "ready" && voiceSnap.enabled && ["off", "permission", "error"].includes(prev)) announcer.say("Voice commands on. Microphone access granted. Press Speak a command, or the V key, before each command.", "optional");
+    else if (voiceSnap.state === "error") announcer.say(`Voice commands unavailable. ${voiceSnap.message}`);
+  }, [voiceSnap.state, voiceSnap.enabled, voiceSnap.message, announcer]);
 
   useEffect(() => {
     if (!state) return;
@@ -121,16 +147,20 @@ export function UserPage() {
       if (state.active_incident) setActionError(null);
       attempt.current = null; store("guidewing.helpAttempt", null);
     }
+    const checkpoint = checkpoints.observe(j, j.waypoint); // first sight of a journey only records its position
     if (!seeded.current) {
       seeded.current = true;
       announcer.seed(jKey);
       if (inc) announcer.seed(`incident:${inc.id}:${inc.status}`);
+      if (inc?.on_my_way_at) announcer.seed(`incident:${inc.id}:on_my_way`);
       // Restore status as text; refresh never submits or replays an old request.
       const restored = state.active_incident;
       announcer.say(restored ? `Existing request: ${STATUS_TEXT[restored.status].toLowerCase()}. No new request was sent on this page load.` : j.status === "idle" ? "Ready when you are. Start a journey to enable Help." : `Journey ${j.status}. ${inc ? `Last request: ${STATUS_TEXT[inc.status].toLowerCase()}.` : "No active help request."}`);
       return;
     }
     if (inc) announcer.announce(`incident:${inc.id}:${inc.status}`, incidentMessage(inc));
+    if (inc?.on_my_way_at && inc.status === "acknowledged") announcer.announce(`incident:${inc.id}:on_my_way`, `${inc.request_source === "test" ? "Test request. " : ""}${ON_MY_WAY_MESSAGE}`);
+    if (checkpoint) announcer.announce(checkpoint.key, checkpoint.text, "optional");
     if (j.pause_reason === "help_request" || j.pause_reason === "obstruction") announcer.seed(jKey);
     else if (j.status === "active") announcer.announce(jKey, j.route_progress > 0.001 ? "Journey resumed." : "Journey started. Press Help, or hold an open palm for two seconds when camera recognition is ready.");
     else if (j.status === "paused") announcer.announce(jKey, "Journey paused. Your help request is unchanged.");
@@ -201,7 +231,7 @@ export function UserPage() {
     const j = state.journey, inc = state.active_incident, last = state.last_incident;
     const parts = ready ? [] : ["Connection unavailable, so this status may be out of date."];
     parts.push(j.status === "idle" ? "Journey not started." : j.status === "active" ? `Journey active near ${j.waypoint ?? "the start"}, ${Math.round(j.route_progress * 100)} percent of the simulated route.` : j.status === "paused" ? `Journey paused. ${pauseReason}` : j.route_progress >= 1 ? "Journey complete." : "Journey ended.");
-    if (inc) parts.push(`Help request: ${STATUS_TEXT[inc.status].toLowerCase()}.${inc.status === "pending" && secondsLeft ? ` ${secondsLeft} seconds left to cancel.` : ""}`);
+    if (inc) parts.push(`Help request: ${STATUS_TEXT[inc.status].toLowerCase()}.${inc.status === "pending" && secondsLeft ? ` ${secondsLeft} seconds left to cancel.` : ""}${inc.status === "acknowledged" && inc.on_my_way_at ? ` ${ON_MY_WAY_MESSAGE}` : ""}`);
     else parts.push(last ? `No active help request. Last request ${STATUS_TEXT[last.status].toLowerCase()}.` : "No active help request.");
     if (v?.obstruction_active) parts.push("Obstacle currently detected ahead.");
     return parts.join(" ");
@@ -260,7 +290,7 @@ export function UserPage() {
             {journey && ["active", "paused"].includes(journey.status) && <button className="btn primary" disabled={!!busy || !ready} onClick={togglePause} aria-keyshortcuts="P">{journey.status === "paused" ? "Resume journey" : "Pause journey"}<Icon name={journey.status === "paused" ? "play" : "pause"} /></button>}
             {journey?.status === "ended" && <><button className="btn primary" disabled={!!busy || !ready || !!active} onClick={startNew}>Start a new journey <Icon name="arrow" /></button>{active && <p className="hint">Cancel or resolve the active help request first.</p>}</>}
           </div></section>
-          <section className="request-strip" aria-label="Help request status"><span className="status-dot" /><div><strong>{busy === "cancel" ? "Cancellation requested" : active ? STATUS_TEXT[active.status] : state?.last_incident ? `Last request: ${STATUS_TEXT[state.last_incident.status].toLowerCase()}` : "No active help request"}</strong><p aria-live="off">{secondsLeft !== null ? secondsLeft > 0 ? `${secondsLeft} seconds left to cancel before simulated dispatch.` : "Deadline reached. Waiting for the server dispatch confirmation." : active?.status === "acknowledged" ? "Acceptance is confirmed by the backend. The responder can mark the request resolved." : active?.status === "dispatched" ? "Cancel remains available until the request is accepted." : "Tap Help once. No holding is required."}</p>{(active ?? state?.last_incident) && <p className="hint">Requested with: {SOURCE_LABEL[(active ?? state!.last_incident!).request_source] ?? "unknown input"}</p>}</div></section>
+          <section className="request-strip" aria-label="Help request status"><span className="status-dot" /><div><strong>{busy === "cancel" ? "Cancellation requested" : active ? STATUS_TEXT[active.status] : state?.last_incident ? `Last request: ${STATUS_TEXT[state.last_incident.status].toLowerCase()}` : "No active help request"}</strong><p aria-live="off">{secondsLeft !== null ? secondsLeft > 0 ? `${secondsLeft} seconds left to cancel before simulated dispatch.` : "Deadline reached. Waiting for the server dispatch confirmation." : active?.status === "acknowledged" ? active.on_my_way_at ? `${ON_MY_WAY_MESSAGE} No arrival time is available.` : "Acceptance is confirmed by the backend. The responder can mark the request resolved." : active?.status === "dispatched" ? "Cancel remains available until the request is accepted." : "Tap Help once. No holding is required."}</p>{(active ?? state?.last_incident) && <p className="hint">Requested with: {SOURCE_LABEL[(active ?? state!.last_incident!).request_source] ?? "unknown input"}</p>}</div></section>
           <section className="voice-section" aria-labelledby="voice-title"><div className="voice-copy"><p className="eyebrow">Voice commands <span className={`status-chip voice-${voiceSnap.state}`}>{VOICE_STATE_LABEL[voiceSnap.state]}</span></p><h2 id="voice-title">Say &ldquo;GuideWing, help.&rdquo;</h2><p>{voiceSnap.message}</p><p className="hint">Commands: GuideWing help, cancel, status, repeat. Each must start with &ldquo;GuideWing&rdquo;. In Edge and Chrome, the browser sends microphone audio to its speech service; GuideWing saves no recordings or transcripts.</p>{voiceSnap.lastHeard && <p className="voice-heard">Last heard: &ldquo;{voiceSnap.lastHeard.transcript.trim()}&rdquo; &middot; {voiceSnap.lastHeard.command ? `command: ${voiceSnap.lastHeard.command}` : "no command"}</p>}</div>
             <div className="voice-action">{voiceSnap.state !== "unsupported" && <button className="btn" onClick={toggleVoice} aria-pressed={voiceSnap.enabled} disabled={voiceSnap.state === "permission"}>{voiceSnap.enabled ? "Disable voice" : "Enable voice"}</button>}{voiceSnap.enabled && <label className="checkbox-option"><input type="checkbox" checked={voiceSnap.continuous} onChange={e => voiceCtl.setContinuous(e.target.checked)} />Keep listening (experimental)</label>}</div></section>
           <details className="camera-details"><summary>Camera & hands-free help {v && <ModeBadge mode={v.input_mode} ready={v.ready} />}</summary><p>{v ? `${MODE_LABEL[v.input_mode]}. ${v.ready ? "Recognition running." : v.error ?? "Not ready."} ${v.ready ? v.gesture_armed ? "Hold an open palm for two seconds to request help." : "Lower your hand to re-arm open-palm help." : ""} ${v.obstruction_active ? "Obstruction detected in the monitored region." : ""}` : "Checking camera..."}</p><p className="hint">Button help works independently of camera recognition.</p>{v && ["live", "replay"].includes(v.input_mode) && <><button className="btn" onClick={() => setShowPreview(x => !x)} aria-expanded={showPreview}>{showPreview ? "Hide camera preview" : "Show camera preview"}</button>{showPreview && <img className="preview" src="/api/vision/stream" alt="Live annotated camera preview showing the monitored region and recognized objects and hands." />}</>}</details>

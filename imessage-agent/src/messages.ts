@@ -4,7 +4,7 @@
 import type { Incident, RequestSource } from "./guidewing.ts";
 
 export const MENU =
-  "GuideWing responder commands: ACCEPT to take the waiting request, RESOLVED when it is handled, " +
+  "GuideWing responder commands: ACCEPT to take the waiting request, ON MY WAY once you set off, RESOLVED when it is handled, " +
   "DETAILS for the recorded facts, LIST for open requests. Simulated demo: no real emergency service is contacted.";
 export const NOT_ALLOWED = "This GuideWing responder line only responds to registered responder numbers.";
 export const SERVER_DOWN =
@@ -35,7 +35,14 @@ const clock = (iso: string | null) => (iso ? `${iso.slice(11, 19)} UTC` : "not r
 export const newRequest = (i: Incident) =>
   `New help request near ${where(i)}, requested with ${VIA[i.request_source] ?? "an unrecognized input"}. Reply ACCEPT to take it, or DETAILS for more.`;
 export const youAccepted = (i: Incident) =>
-  `You accepted the request near ${where(i)}. The user has been told a responder accepted. Reply RESOLVED when it is handled.`;
+  `You accepted the request near ${where(i)}. The user has been told a responder accepted. Reply RESOLVED when it is handled, and ON MY WAY when you set off.`;
+export const youOnMyWay = (i: Incident) =>
+  `The user has been told you are on the way to ${where(i)}. No arrival time was shared. Reply RESOLVED when it is handled.`;
+export const alreadyOnMyWay = () => "The user was already told you are on the way. Nothing new was sent.";
+export const onMyWayByOther = (i: Incident) =>
+  `${i.responder ?? "The assigned responder"} is on the way to the request near ${where(i)}. No action needed.`;
+export const onMyWayUnverified = (i: Incident) =>
+  `On my way was not sent: this agent cannot prove it made your acceptance of the request near ${where(i)} (for example after an agent restart). The user still knows a responder accepted.`;
 export const acceptedByOther = (i: Incident) =>
   `The request near ${where(i)} was accepted by ${i.responder ?? "another responder"}. No action needed.`;
 export const alreadyAccepted = (i: Incident) => `Already accepted by ${i.responder ?? "another responder"}.`;
@@ -51,6 +58,7 @@ export function details(i: Incident): string {
     `Request near ${where(i)}${i.is_test ? " (TEST)" : ""}.`,
     `Status: ${i.status}. Requested with ${VIA[i.request_source] ?? "an unrecognized input"}.`,
     `Requested ${clock(i.created_at)}, dispatched ${clock(i.dispatched_at)}${i.acknowledged_at ? `, accepted ${clock(i.acknowledged_at)} by ${i.responder}` : ""}.`,
+    ...(i.on_my_way_at ? [`Responder reported on the way at ${clock(i.on_my_way_at)} (no arrival time).`] : []),
     i.snapshot_url ? "A blurred camera snapshot is on the responder desk." : "No camera snapshot.",
     "Location is from the simulated demo route.",
   ].join("\n");
@@ -60,5 +68,5 @@ export function list(open: Incident[], now = Date.now()): string {
   if (!open.length) return "No open requests.";
   const label = { pending: "in cancellation window", dispatched: "waiting for acceptance", acknowledged: "accepted" } as Record<string, string>;
   return "Open requests:\n" + open.map((i, n) =>
-    `${n + 1}) near ${i.location.landmark ?? "unknown"}: ${label[i.status] ?? i.status}${i.status === "acknowledged" && i.responder ? ` by ${i.responder}` : ""}, ${age(i.created_at, now)}`).join("\n");
+    `${n + 1}) near ${i.location.landmark ?? "unknown"}: ${label[i.status] ?? i.status}${i.status === "acknowledged" && i.responder ? ` by ${i.responder}` : ""}${i.on_my_way_at ? ", on the way" : ""}, ${age(i.created_at, now)}`).join("\n");
 }

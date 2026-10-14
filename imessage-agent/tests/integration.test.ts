@@ -119,12 +119,25 @@ test("user cancellations: silent inside the window, pushed after dispatch", asyn
 test("a voice-command request reaches responders and is accepted and resolved through the same backend", async () => {
   const { sent, text } = await setup();
   await text(A, "list");
+  await text(B, "list");
   const incident = await userRequest("voice-it-request-4", "voice");
   assert.equal(incident.request_source, "voice");
   await until(() => sent[A]!.length === 1, 8000);
   assert.match(sent[A]![0]!, /^New help request near .*, requested with a spoken voice command\. Reply ACCEPT/);
   assert.match(await text(A, "accept"), /^You accepted the request/);
   assert.equal((await api("GET", `/api/incidents/${incident.id}`)).status, "acknowledged");
+  assert.match(await text(B, "on my way"), /only they can send On my way/); // not the assigned responder
+  assert.match(await text(A, "on my way"), /^The user has been told you are on the way/);
+  assert.equal(await text(A, "on my way"), "The user was already told you are on the way. Nothing new was sent.");
+  const snap = await api("GET", "/api/simulation/state?journey_id=current");
+  assert.equal(snap.active_incident.status, "acknowledged"); // still acknowledged: a progress update, not a status
+  assert.ok(snap.active_incident.on_my_way_at);
+  const timeline = (await api("GET", `/api/incidents/${incident.id}`)).timeline.map((e: { type: string }) => e.type);
+  assert.equal(timeline.filter((t: string) => t === "on_my_way").length, 1);
+  await until(() => sent[B]!.some((m) => /is on the way to the request/.test(m)));
+  await sleep(300);
+  assert.equal(sent[B]!.filter((m) => /is on the way/.test(m)).length, 1);
+  assert.equal(sent[A]!.filter((m) => /is on the way/.test(m)).length, 0); // never pushed their own action
   assert.match(await text(A, "details"), /Requested with a spoken voice command\./);
   assert.match(await text(A, "resolved"), /marked resolved/);
   assert.equal((await api("GET", `/api/incidents/${incident.id}`)).status, "resolved");

@@ -28,7 +28,8 @@ GuideWing explores a personal campus companion for blind, low-vision and older p
 | Gemini response review for individual incidents | **Implemented**; live-verified by a teammate on synthetic data, not re-verified on this machine |
 | Voice commands ("GuideWing, help / cancel / status / repeat", browser speech recognition) | **Implemented; tested with a simulated recognizer only** (unit + headless Edge checks). Real-microphone recognition on the demo laptop unverified. See [docs/VOICE_COMMANDS.md](docs/VOICE_COMMANDS.md) |
 | ElevenLabs server voice | **Implemented, unverified.** No ElevenLabs key has been used; browser speech is the fallback |
-| iMessage responder agent via **Photon Spectrum** (responders get new requests by text, reply `accept` / `resolved`) | **Implemented and tested against the real backend** (15 agent tests). Live iPhone test pending |
+| iMessage responder agent via **Photon Spectrum** (responders get new requests by text, reply `accept` / `resolved`) | **Implemented and tested against the real backend** (18 agent tests, including `on my way`). Live iPhone test pending |
+| Simulated-route checkpoints, responder "On my way", camera/server/voice readiness announcements | **Implemented; tested in headless Edge with stubbed speech** (35 checks) and unit tests. Audible playback, real camera loss and live iMessage unverified. See [docs/ROUTE_AND_READINESS_FEEDBACK.md](docs/ROUTE_AND_READINESS_FEEDBACK.md) |
 | Screen-reader (NVDA/Narrator/TalkBack) behavior | **Unverified** |
 | Native phone app, headphone audio, closed-fist or other cancel gestures | **Planned / not implemented** |
 | Real drone flight, real GPS or device location | **Not implemented.** Journey and location are simulated |
@@ -41,6 +42,7 @@ All pages are served by the backend on one port (default `http://127.0.0.1:8000`
 - **Journey:** Start journey, Pause/Resume, and Start a new journey when one ends; progress shown as a percentage, with the **simulated** location and landmark.
 - **Always-present controls:** **Help**, **Cancel** and **Repeat last message**. Unavailable controls stay focusable and explain why (for example "A help request is already active").
 - **Countdown:** a 10-second cancellation countdown that follows the server's deadline.
+- **Spoken updates:** simulated-route checkpoints ("You've reached Library crossing on the simulated route."), "Your responder says they are on the way.", and camera/server/voice readiness or failure (for example "Camera unavailable. You can still request help."), each said once with hold times against flicker.
 - **Speech:** messages are spoken once per event and never replayed automatically after a refresh. **Repeat** replays the last message on demand; **Status** (**S**) speaks the journey and request state without changing it.
 - **Voice commands (optional, off by default):** **Enable voice**, then **Speak a command** (**V**) and say "GuideWing, help", "…cancel", "…status" or "…repeat". Uses the browser's speech recognition (cloud-processed in Edge/Chrome, not offline); no recordings or transcripts are stored. Obstacle warnings say "Obstacle detected ahead. Please pause." and never give directions.
 - **Settings:** choose spoken feedback, screen-reader announcements or text only; toggle single-key shortcuts (**H** Help, **C**/**Esc** Cancel, **R** Repeat, **S** Status, **V** Speak a command, **P** Pause/Resume); end the journey.

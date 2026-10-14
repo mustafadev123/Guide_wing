@@ -33,6 +33,7 @@ def snapshot_incident(incident: Incident | None, now) -> SnapshotIncident | None
         acknowledged_at=incident.acknowledged_at,
         updated_at=incident.updated_at,
         version=incident.version,
+        on_my_way_at=incident.on_my_way_at,
     )
 
 

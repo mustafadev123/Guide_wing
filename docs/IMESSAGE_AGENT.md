@@ -15,10 +15,13 @@ The agent makes no lifecycle decisions. It calls the same endpoints as the respo
 | Text | Effect |
 |---|---|
 | `accept` (also `yes`, `omw`, `coming`) | Accept the oldest request waiting for a responder. The backend records the responder as `iMessage responder (…last 4 digits)`. If someone else was first: "Already accepted by …" |
+| `on my way` (also `onmyway`) | After **you** accepted: tells the user "Your responder says they are on the way." Recorded once as a separate update; the request stays accepted. No arrival time is sent. A repeat changes nothing. An explicit `accept`/`yes` in the same text still means accept |
 | `resolved` (also `done`, `handled`, `complete`) | Resolve the request **you** accepted. A request accepted by someone else is left to them |
 | `details` | Recorded facts: simulated landmark, status, how it was requested, timestamps (UTC), whether a blurred snapshot is on the desk |
 | `list` / `status` | Open requests: in the cancellation window, waiting for acceptance, or accepted (by whom) |
 | anything else | List of commands |
+
+**Who may send On my way:** the backend gives a one-time `responder_token` only to the accept that won, and requires it for On my way. The agent keeps the token in memory per request, alongside the number that accepted. Another responder, the web desk, or a forged request cannot send it. **Limit:** the token proves which agent process accepted, and the agent maps it to the sender number that Photon reports. After an agent restart the token is gone, so On my way is refused with an explanation instead of being sent without proof.
 
 Matching is by keyword, with no AI interpretation. `accept` during the user's cancellation window explains that the request is not sent yet; nothing is accepted early.
 
@@ -31,6 +34,7 @@ Each message is sent **once** per request and status, whichever channel caused t
 | Request dispatched | New help request near *Library crossing (simulated location)*, requested with *the Help button*. Reply ACCEPT to take it, or DETAILS for more. |
 | Accepted by another responder (iMessage or web desk) | The request near … was accepted by *name*. No action needed. |
 | User cancelled after dispatch | The user cancelled the request near …. No action needed. |
+| Assigned responder reported On my way (iMessage or web desk) | *name* is on the way to the request near …. No action needed. |
 | Resolved by someone else | The request near … was marked resolved (accepted by *name*). |
 
 A request cancelled **inside** the window never reached responders, so nothing is sent.
@@ -65,7 +69,8 @@ During the first live test, the agent answered every **non-text** iMessage event
 1. Responder phone(s) text `list` → "No open requests."
 2. On `/user`, press Help (or hold an open palm). After 10 seconds every responder gets "New help request near …".
 3. A responder replies `accept`. `/user` announces the acceptance, the desk shows "iMessage responder (…1234)", and other responders are told.
-4. The responder replies `resolved`. The request is resolved on `/user` and the desk.
+4. The same responder replies `on my way`. `/user` says "Your responder says they are on the way.", and the desk shows the On my way time.
+5. The responder replies `resolved`. The request is resolved on `/user` and the desk.
 
 The agent refuses to start without an allowlist or Photon credentials. Unregistered numbers get "This GuideWing responder line only responds to registered responder numbers." and cannot act.
 
@@ -74,14 +79,14 @@ The agent refuses to start without an allowlist or Photon credentials. Unregiste
 ```powershell
 cd imessage-agent
 $env:PATH = "..\tools\node;$env:PATH"
-..\tools\node\npm.cmd test          # 12 unit tests + 3 integration tests against a real backend
+..\tools\node\npm.cmd test          # 15 unit tests + 3 integration tests against a real backend
 ..\tools\node\npm.cmd run typecheck # strict TypeScript against the real spectrum-ts types
 ```
 
 The integration tests start the real GuideWing backend from the project `.venv` on a free port, with a temporary database and a 2-second cancellation window:
 - A simulated user presses Help through the API. Two responders are pushed the request after dispatch. Responder A accepts (the backend records the name), B is told and cannot accept or resolve it, and A resolves. Every push is sent once, and an unregistered number is refused.
 - Cancelled inside the window: nobody is told, and it stays cancelled after the deadline. Cancelled after dispatch: responders are told.
-- A voice-command request (`request_source: "voice"`) is pushed as "requested with a spoken voice command", then accepted and resolved by iMessage.
+- A voice-command request (`request_source: "voice"`) is pushed as "requested with a spoken voice command", accepted by iMessage, then: the other responder's `on my way` is refused, the acceptor's is recorded once (status still acknowledged), a repeat changes nothing, and the other responder is told exactly once. Then it is resolved.
 
 ## Privacy and limits
 

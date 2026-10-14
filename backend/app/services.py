@@ -10,7 +10,10 @@ Every cancel/accept first processes due deadlines, so a cancel arriving at or
 after the deadline is recorded as "cancelled after dispatch" (responders are told).
 """
 
+import hashlib
+import hmac
 import json
+import secrets
 import uuid
 from datetime import timedelta
 
@@ -24,6 +27,10 @@ MAX_TICK_S = 1.0  # a stalled ticker must not teleport the companion
 
 
 class NotFound(Exception):
+    pass
+
+
+class Forbidden(Exception):
     pass
 
 
@@ -237,6 +244,7 @@ class IncidentService:
             responder=row["responder"],
             version=row["version"],
             is_test=row["request_source"] == "test",
+            on_my_way_at=row["on_my_way_at"],
         )
 
     def get(self, incident_id: str) -> Incident:
@@ -352,7 +360,7 @@ class IncidentService:
             out.append(incident)
         return out
 
-    def _change(self, incident_id, allowed_from, to_status, stamp_col, detail, responder=None) -> tuple[Incident, bool]:
+    def _change(self, incident_id, allowed_from, to_status, stamp_col, detail, responder=None, token_hash=None) -> tuple[Incident, bool]:
         self.process_due()
         now = utc_iso(self.clock.now())
         with self.db.transaction() as c:
@@ -366,8 +374,9 @@ class IncidentService:
                 raise Conflict(f"cannot change incident from {previous} to {to_status}", status=previous)
             cur = c.execute(
                 f"UPDATE incidents SET status = ?, {stamp_col} = ?, updated_at = ?, version = version + 1,"
-                " responder = COALESCE(?, responder) WHERE id = ? AND status = ?",
-                (to_status, now, now, responder, incident_id, previous),
+                " responder = COALESCE(?, responder), responder_token_hash = COALESCE(?, responder_token_hash)"
+                " WHERE id = ? AND status = ?",
+                (to_status, now, now, responder, token_hash, incident_id, previous),
             )
             if cur.rowcount != 1:  # defensive; the lock already serializes writers
                 raise Conflict("incident changed concurrently; retry")
@@ -379,14 +388,44 @@ class IncidentService:
     def cancel(self, incident_id: str) -> tuple[Incident, bool]:
         return self._change(incident_id, {"pending", "dispatched"}, "cancelled", "cancelled_at", "cancelled by user")
 
-    def accept(self, incident_id: str, responder: str | None = None) -> tuple[Incident, bool]:
+    def accept(self, incident_id: str, responder: str | None = None) -> tuple[Incident, bool, str | None]:
+        """Returns (incident, changed, responder_token). The token goes only to the winning caller."""
         row = self.db.query_one("SELECT status, dispatch_at FROM incidents WHERE id = ?", (incident_id,))
         if row is not None and row["status"] == "pending" and parse_iso(row["dispatch_at"]) > self.clock.now():
             raise Conflict("incident has not been dispatched yet", status="pending")
-        return self._change(
+        token = secrets.token_urlsafe(24)
+        incident, changed = self._change(
             incident_id, {"dispatched"}, "acknowledged", "acknowledged_at",
             f"accepted by {responder or 'responder'}", responder=responder or "Local responder (simulated)",
+            token_hash=_hash(token),
         )
+        return incident, changed, token if changed else None
+
+    def on_my_way(self, incident_id: str, responder_token: str) -> tuple[Incident, bool]:
+        """Progress update by the assigned responder; idempotent. The status stays 'acknowledged'."""
+        self.process_due()
+        now = utc_iso(self.clock.now())
+        with self.db.transaction() as c:
+            row = c.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None:
+                raise NotFound(f"incident {incident_id} not found")
+            if row["status"] != "acknowledged":
+                raise Conflict(f"On my way is only possible for an accepted request; this one is {row['status']}",
+                               status=row["status"])
+            stored = row["responder_token_hash"]
+            if not stored or not hmac.compare_digest(stored, _hash(responder_token)):
+                raise Forbidden("only the responder who accepted this request can report On my way")
+            if row["on_my_way_at"]:
+                return self._to_model(row), False  # repeated command: no second update or event
+            c.execute(
+                "UPDATE incidents SET on_my_way_at = ?, updated_at = ?, version = version + 1"
+                " WHERE id = ? AND status = 'acknowledged' AND on_my_way_at IS NULL",
+                (now, now, incident_id),
+            )
+            self._log(c, incident_id, "on_my_way", f"{row['responder'] or 'responder'} reported on the way")
+        incident = self.get(incident_id)
+        self._publish(incident, "on_my_way", "acknowledged")
+        return incident, True
 
     def resolve(self, incident_id: str) -> tuple[Incident, bool]:
         return self._change(incident_id, {"acknowledged"}, "resolved", "resolved_at", "resolved by responder")
@@ -423,4 +462,8 @@ class IncidentService:
         )
 
 
-__all__ = ["JourneyService", "IncidentService", "NotFound", "Conflict", "OPEN_STATUSES"]
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+__all__ = ["JourneyService", "IncidentService", "NotFound", "Conflict", "Forbidden", "OPEN_STATUSES"]

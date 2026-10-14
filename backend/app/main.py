@@ -22,9 +22,9 @@ from .providers import DeterministicBriefing
 from .route import Route
 from .schemas import (
     AcceptBody, Health, Incident, IncidentCreate, IncidentDetail, IncidentResult, Journey,
-    Location, LocationUpdate, SimulationState, VisionStatus,
+    Location, LocationUpdate, OnMyWayBody, SimulationState, VisionStatus,
 )
-from .services import Conflict, IncidentService, JourneyService, NotFound
+from .services import Conflict, Forbidden, IncidentService, JourneyService, NotFound
 from .simulation import MOCK_SCENARIOS, SimulationSnapshotter
 from .snapshot import save_blurred_snapshot
 from .sponsors import ElevenLabsSpeech, GeminiBriefing, incident_facts
@@ -183,6 +183,10 @@ def create_app(settings: Settings | None = None, clock=None, start_background: b
     async def not_found(_: Request, exc: NotFound):
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
+    @app.exception_handler(Forbidden)
+    async def forbidden(_: Request, exc: Forbidden):
+        return JSONResponse({"detail": str(exc)}, status_code=403)
+
     @app.exception_handler(Conflict)
     async def conflict(_: Request, exc: Conflict):
         return JSONResponse({"detail": str(exc), **exc.extra}, status_code=409)
@@ -255,7 +259,13 @@ def create_app(settings: Settings | None = None, clock=None, start_background: b
 
     @app.post("/api/incidents/{incident_id}/accept", response_model=IncidentResult)
     def accept_incident(incident_id: str, body: AcceptBody | None = None):
-        incident, changed = svc.incidents.accept(incident_id, body.responder if body else None)
+        incident, changed, token = svc.incidents.accept(incident_id, body.responder if body else None)
+        return IncidentResult(incident=incident, changed=changed, responder_token=token)
+
+    @app.post("/api/incidents/{incident_id}/on-my-way", response_model=IncidentResult)
+    def on_my_way(incident_id: str, body: OnMyWayBody):
+        """Assigned responder reports they are on the way (requires the token from their accept)."""
+        incident, changed = svc.incidents.on_my_way(incident_id, body.responder_token)
         return IncidentResult(incident=incident, changed=changed)
 
     @app.post("/api/incidents/{incident_id}/resolve", response_model=IncidentResult)

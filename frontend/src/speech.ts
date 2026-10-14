@@ -117,7 +117,11 @@ export class ServerThenBrowserSpeech implements SpeechProvider {
 const LAST_KEY = "guidewing.lastMessage";
 const SPOKEN_KEY = "guidewing.spokenKeys";
 
-/** "urgent" (obstacle warnings) is never interrupted by "optional" narration such as a spoken Status. */
+/**
+ * "urgent": obstacle warnings. "normal": assistance and connection updates. "optional": narration
+ * (spoken Status, simulated-route checkpoints, readiness). Optional speech never interrupts urgent or
+ * normal speech; it is dropped instead of queued, so nothing stale plays later.
+ */
 export type Priority = "urgent" | "normal" | "optional";
 
 export class Announcer {
@@ -177,7 +181,7 @@ export class Announcer {
 
   /** Speak without dedupe (status confirmations for the user's own actions). Returns false if skipped. */
   say(text: string, priority: Priority = "normal") {
-    if (priority === "optional" && this.speaking && this.speakingPriority === "urgent") return false; // obsolete narration is dropped
+    if (priority === "optional" && this.speaking && this.speakingPriority !== "optional") return false; // dropped, never queued
     this.lastMessage = text;
     safeSet(LAST_KEY, text);
     this.onText(text);

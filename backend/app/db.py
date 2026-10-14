@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS incidents (
     location_json TEXT NOT NULL,
     snapshot_path TEXT,
     responder TEXT,
-    version INTEGER NOT NULL DEFAULT 1
+    version INTEGER NOT NULL DEFAULT 1,
+    on_my_way_at TEXT,          -- responder progress update; status stays 'acknowledged'
+    responder_token_hash TEXT   -- SHA-256 of the token returned only to the accepting client
 );
 -- At most one nonterminal incident per journey, enforced by the database too.
 CREATE UNIQUE INDEX IF NOT EXISTS one_open_incident_per_journey
@@ -69,6 +71,14 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive columns for databases created by earlier versions; existing rows keep NULL."""
+        have = {r["name"] for r in self.conn.execute("PRAGMA table_info(incidents)")}
+        for column in ("on_my_way_at", "responder_token_hash"):
+            if column not in have:
+                self.conn.execute(f"ALTER TABLE incidents ADD COLUMN {column} TEXT")
 
     @contextmanager
     def transaction(self):

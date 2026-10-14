@@ -81,6 +81,8 @@ class Incident(BaseModel):
     responder: str | None
     version: int
     is_test: bool
+    # Separate progress update by the assigned responder; null until reported. Not a status.
+    on_my_way_at: str | None = None
 
 
 class IncidentEvent(BaseModel):
@@ -110,6 +112,12 @@ class IncidentResult(BaseModel):
     incident: Incident
     created: bool = False
     changed: bool = False
+    # Returned once, only to the client whose accept succeeded; required for "On my way".
+    responder_token: str | None = None
+
+
+class OnMyWayBody(BaseModel):
+    responder_token: str = Field(min_length=16, max_length=128)
 
 
 class AcceptBody(BaseModel):
@@ -144,6 +152,7 @@ class SnapshotIncident(BaseModel):
     acknowledged_at: str | None
     updated_at: str
     version: int
+    on_my_way_at: str | None = None
 
 
 class SnapshotVision(BaseModel):

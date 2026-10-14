@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GuideWingAgent, SendLimiter, maskSender, parseCommand, responderName } from "../src/agent.ts";
-import type { Backend, Incident, ServerEvent } from "../src/guidewing.ts";
+import { BackendError, type Backend, type Incident, type ServerEvent } from "../src/guidewing.ts";
 import * as say from "../src/messages.ts";
 
 const A = "+15550001111";
@@ -28,6 +28,16 @@ class FakeBackend implements Backend {
     const cur = this.list.find((i) => i.id === id)!;
     if (cur.status !== "dispatched") return { incident: structuredClone(cur), changed: false };
     Object.assign(cur, { status: "acknowledged", responder, acknowledged_at: "2026-10-11T07:00:20Z" });
+    return { incident: structuredClone(cur), changed: true, responder_token: `token-${id}-${responder}` };
+  }
+  async onMyWay(id: string, token: string) {
+    this.calls.push(`omw:${id}`);
+    this.onCall();
+    const cur = this.list.find((i) => i.id === id)!;
+    if (cur.status !== "acknowledged") throw new BackendError(409, `On my way is only possible for an accepted request; this one is ${cur.status}`);
+    if (token !== `token-${id}-${cur.responder}`) throw new BackendError(403, "only the responder who accepted this request can report On my way");
+    if (cur.on_my_way_at) return { incident: structuredClone(cur), changed: false };
+    cur.on_my_way_at = "2026-10-11T07:00:30Z";
     return { incident: structuredClone(cur), changed: true };
   }
   async resolve(id: string) {
@@ -59,6 +69,68 @@ test("parseCommand: responder keywords", () => {
   assert.equal(parseCommand("list"), "list");
   assert.equal(parseCommand("status"), "list");
   assert.equal(parseCommand("hi there"), "menu");
+  assert.equal(parseCommand("On my way"), "on_my_way");
+  assert.equal(parseCommand("onmyway!"), "on_my_way");
+  assert.equal(parseCommand("ok I'm on my way now"), "on_my_way");
+  assert.equal(parseCommand("omw"), "accept"); // unchanged alias
+  assert.equal(parseCommand("on the way"), "menu");
+});
+
+test("on my way: only the acceptor, once; others told once; the user-facing update needs the accept token", async () => {
+  const b = new FakeBackend();
+  b.list = [inc("dispatched")];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A, B]) });
+  const { sent, text } = responders(agent);
+  await text(B, "list");
+  assert.match(await text(A, "on my way"), /Accept the request first/);
+  await text(A, "accept");
+  await tick();
+  sent[B]!.length = 0;
+  assert.match(await text(B, "on my way"), /accepted by iMessage responder \(…1111\), so only they can send On my way/);
+  b.onCall = () => agent.handleEvent(event(b.list[0]!, "on_my_way")); // event before the HTTP reply
+  assert.match(await text(A, "on my way"), /^The user has been told you are on the way to Library crossing.*No arrival time/);
+  assert.equal(await text(A, "onmyway"), say.alreadyOnMyWay());
+  agent.handleEvent(event(b.list[0]!, "on_my_way")); // duplicate event
+  await tick();
+  assert.deepEqual(b.calls.filter((c) => c.startsWith("omw")), ["omw:i1"]);
+  assert.deepEqual(sent[A], []);
+  assert.deepEqual(sent[B], [say.onMyWayByOther(b.list[0]!)]);
+  assert.match(sent[B]![0]!, /iMessage responder \(…1111\) is on the way to the request near Library crossing/);
+  assert.match(await text(A, "details"), /Responder reported on the way at 07:00:30 UTC \(no arrival time\)/);
+  assert.match(await text(A, "list"), /accepted by iMessage responder \(…1111\), on the way/);
+  b.onCall = () => {};
+  await text(A, "resolved");
+  assert.equal(await text(A, "on my way"), "You have no accepted request.");
+});
+
+test("on my way after an agent restart is refused rather than sent without proof", async () => {
+  const b = new FakeBackend();
+  b.list = [inc("acknowledged", { responder: responderName(A) })];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) }); // fresh agent: no token held
+  const { text } = responders(agent);
+  assert.match(await text(A, "on my way"), /^On my way was not sent: this agent cannot prove/);
+  assert.deepEqual(b.calls, []);
+});
+
+test("on my way reported on the web desk is pushed once, also after a reconnect resync", async () => {
+  const b = new FakeBackend();
+  b.list = [inc("acknowledged", { responder: "Desk A" })];
+  const agent = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const { sent, text } = responders(agent);
+  await text(A, "list");
+  await agent.resync(); // seed
+  b.list[0]!.on_my_way_at = "2026-10-11T07:00:30Z"; // happened while disconnected
+  await agent.resync();
+  agent.handleEvent(event(b.list[0]!, "on_my_way")); // late event after resync
+  await agent.resync();
+  await tick();
+  assert.deepEqual(sent[A], ["Desk A is on the way to the request near Library crossing (simulated location). No action needed."]);
+  const fresh = new GuideWingAgent(b, { allowedSenders: new Set([A]) });
+  const r2 = responders(fresh);
+  await r2.text(A, "list");
+  await fresh.resync(); // first sync after start: seeds, never replays
+  await tick();
+  assert.deepEqual(r2.sent[A], []);
 });
 
 test("unregistered senders are refused without touching the backend", async () => {

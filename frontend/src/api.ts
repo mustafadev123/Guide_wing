@@ -52,6 +52,8 @@ export interface Incident {
   responder: string | null;
   version: number;
   is_test: boolean;
+  /** Assigned responder reported "On my way" (progress update; status stays acknowledged). */
+  on_my_way_at?: string | null;
 }
 
 export interface SnapshotIncident {
@@ -64,6 +66,7 @@ export interface SnapshotIncident {
   acknowledged_at: string | null;
   updated_at: string;
   version: number;
+  on_my_way_at?: string | null;
 }
 
 export interface SimulationState {
@@ -110,6 +113,8 @@ export interface IncidentResult {
   incident: Incident;
   created: boolean;
   changed: boolean;
+  /** Only in the reply to the accept that won; required for "On my way". */
+  responder_token?: string | null;
 }
 
 export interface AnalyticsConfiguration {
@@ -196,6 +201,7 @@ export const api = {
   incident: (id: string) => call<Incident & { timeline: { type: string; at: string; detail: string | null }[] }>("GET", `/api/incidents/${id}`),
   cancel: (id: string) => call<IncidentResult>("POST", `/api/incidents/${id}/cancel`),
   accept: (id: string, responder: string) => call<IncidentResult>("POST", `/api/incidents/${id}/accept`, { responder }),
+  onMyWay: (id: string, responderToken: string) => call<IncidentResult>("POST", `/api/incidents/${id}/on-my-way`, { responder_token: responderToken }),
   resolve: (id: string) => call<IncidentResult>("POST", `/api/incidents/${id}/resolve`),
   briefing: (id: string) =>
     call<{ provider: string; text: string; deterministic: string; ai_status: string; ai_reason?: string }>("GET", `/api/incidents/${id}/briefing`),

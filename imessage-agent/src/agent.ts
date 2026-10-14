@@ -12,13 +12,18 @@
 import { BackendError, type Backend, type Incident, type ServerEvent } from "./guidewing.ts";
 import * as say from "./messages.ts";
 
-export type Command = "accept" | "resolve" | "details" | "list" | "menu";
+export type Command = "accept" | "on_my_way" | "resolve" | "details" | "list" | "menu";
 
 export function parseCommand(text: string): Command {
-  const words = new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean));
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const words = new Set(normalized.split(" ").filter(Boolean));
   const has = (...w: string[]) => w.some((x) => words.has(x));
   if (has("resolve", "resolved", "done", "complete", "completed", "handled")) return "resolve";
-  if (has("accept", "accepted", "yes", "omw", "coming")) return "accept";
+  // An explicit accept word wins ("yes, on my way" still accepts, as before); plain "on my way" is the
+  // progress update. The older accept aliases "omw" and "coming" are unchanged.
+  if (has("accept", "accepted", "yes")) return "accept";
+  if (/(^| )on my way( |$)/.test(normalized) || has("onmyway")) return "on_my_way";
+  if (has("omw", "coming")) return "accept";
   if (has("details", "detail", "info", "where", "more")) return "details";
   if (has("list", "status", "open", "requests")) return "list";
   return "menu";
@@ -46,13 +51,17 @@ export function responderName(senderId: string | undefined): string {
 }
 
 const OPEN = new Set(["pending", "dispatched", "acknowledged"]);
+const signature = (i: Incident) => `${i.status}${i.on_my_way_at ? "+on_my_way" : ""}`;
 const byAge = (a: Incident, b: Incident) => Date.parse(a.created_at) - Date.parse(b.created_at);
 
 export class GuideWingAgent {
   private readonly conversations = new Map<string, Conversation>(); // sender id -> latest conversation
   private readonly announced = new Set<string>(); // incident:id:status already pushed
   private readonly ownActions = new Map<string, string>(); // incident:id:status -> sender who did it here
-  private readonly known = new Map<string, string>(); // incident id -> last status seen
+  private readonly known = new Map<string, string>(); // incident id -> last status (+on my way) seen
+  // incident id -> token from a successful accept made here; proves to the backend who accepted.
+  // Memory only: after an agent restart On my way is refused (the user is still told it was accepted).
+  private readonly tokens = new Map<string, { who: string; token: string }>();
   private seeded = false;
   private readonly log: (message: string) => void;
   private readonly backend: Backend;
@@ -109,7 +118,23 @@ export class GuideWingAgent {
           const taken = open.find((i) => i.status === "acknowledged");
           return taken ? say.alreadyAccepted(taken) : "There is no request waiting for a responder.";
         }
-        return this.act(who, target, "acknowledged", () => this.backend.accept(target.id, me), say.youAccepted, say.alreadyAccepted);
+        return this.act(who, target, "acknowledged", async () => {
+          const result = await this.backend.accept(target.id, me);
+          if (result.changed && result.responder_token) this.tokens.set(target.id, { who, token: result.responder_token });
+          return result;
+        }, say.youAccepted, say.alreadyAccepted);
+      }
+      case "on_my_way": {
+        const target = mine[0];
+        if (!target) {
+          if (waiting[0]) return `Accept the request first: reply ACCEPT. ${say.where(waiting[0])} is waiting.`;
+          const taken = open.find((i) => i.status === "acknowledged");
+          return taken ? `That request was accepted by ${taken.responder ?? "another responder"}, so only they can send On my way.` : "You have no accepted request.";
+        }
+        if (target.on_my_way_at) return say.alreadyOnMyWay();
+        const held = this.tokens.get(target.id);
+        if (!held || held.who !== who) return say.onMyWayUnverified(target);
+        return this.act(who, target, "on_my_way", () => this.backend.onMyWay(target.id, held.token), say.youOnMyWay, say.alreadyOnMyWay);
       }
       case "resolve": {
         const target = mine[0];
@@ -144,12 +169,12 @@ export class GuideWingAgent {
     }
   }
 
-  /** Push an incident status to every responder once. Returns true if sent now. */
-  private relay(incident: Incident): boolean {
-    this.known.set(incident.id, incident.status);
-    const text = this.pushText(incident);
+  /** Push an incident status (or the On my way update) to every responder once. Returns true if sent now. */
+  private relay(incident: Incident, kind: string = incident.status): boolean {
+    this.known.set(incident.id, signature(incident));
+    const text = kind === "on_my_way" ? say.onMyWayByOther(incident) : this.pushText(incident);
     if (!text) return false;
-    const key = `incident:${incident.id}:${incident.status}`;
+    const key = `incident:${incident.id}:${kind}`;
     if (this.announced.has(key)) return false;
     this.announced.add(key); // set before any await: concurrent relays of the same key send once
     const actor = this.ownActions.get(key);
@@ -175,7 +200,7 @@ export class GuideWingAgent {
     if (event.type !== "incident.updated") return;
     const payload = event.payload as { incident: Incident; transition: string };
     if (payload.transition === "snapshot_attached") return;
-    this.relay(payload.incident);
+    this.relay(payload.incident, payload.transition === "on_my_way" ? "on_my_way" : payload.incident.status);
   }
 
   /**
@@ -189,12 +214,19 @@ export class GuideWingAgent {
     if (!this.seeded) {
       this.seeded = true;
       for (const i of recent) {
-        this.known.set(i.id, i.status);
+        this.known.set(i.id, signature(i));
         this.announced.add(`incident:${i.id}:${i.status}`);
+        if (i.on_my_way_at) this.announced.add(`incident:${i.id}:on_my_way`);
       }
       return;
     }
-    for (const i of recent.sort(byAge)) if (this.known.get(i.id) !== i.status) this.relay(i);
+    for (const i of recent.sort(byAge)) {
+      const before = this.known.get(i.id);
+      if (before === signature(i)) continue;
+      if (before?.split("+")[0] !== i.status) this.relay(i);
+      if (i.on_my_way_at && i.status === "acknowledged") this.relay(i, "on_my_way");
+      this.known.set(i.id, signature(i));
+    }
   }
 }
 

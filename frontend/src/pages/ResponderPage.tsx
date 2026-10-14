@@ -7,6 +7,14 @@ import { AnalyticsPanel } from "../analytics";
 import { useFreshness } from "../events";
 
 const RESPONDER_NAME = "Campus safety desk (simulated)";
+// Token from this browser tab's own successful accept; the backend requires it for "On my way".
+const TOKENS_KEY = "guidewing.responderTokens";
+function tokenFor(id: string): string | null {
+  try { return (JSON.parse(sessionStorage.getItem(TOKENS_KEY) ?? "{}") as Record<string, string>)[id] ?? null; } catch { return null; }
+}
+function saveToken(id: string, token: string) {
+  try { const all = JSON.parse(sessionStorage.getItem(TOKENS_KEY) ?? "{}") as Record<string, string>; all[id] = token; sessionStorage.setItem(TOKENS_KEY, JSON.stringify(all)); } catch { /* this tab cannot send On my way */ }
+}
 
 interface BriefingData {
   provider: string;
@@ -101,6 +109,12 @@ function IncidentCard({ incident, onAction, busy }: { incident: Incident; onActi
             <dd>{formatTime(incident.acknowledged_at)} by {incident.responder}</dd>
           </>
         )}
+        {incident.on_my_way_at && (
+          <>
+            <dt>On my way</dt>
+            <dd>{formatTime(incident.on_my_way_at)}, reported by the assigned responder (no arrival time)</dd>
+          </>
+        )}
         {incident.cancelled_at && (
           <>
             <dt>Cancelled by user</dt>
@@ -123,8 +137,17 @@ function IncidentCard({ incident, onAction, busy }: { incident: Incident; onActi
       )}
       <div className="controls">
         {incident.status === "dispatched" && (
-          <button className="btn primary huge" disabled={busy} onClick={() => onAction(() => api.accept(incident.id, RESPONDER_NAME))}>
+          <button className="btn primary huge" disabled={busy} onClick={() => onAction(async () => {
+            const result = await api.accept(incident.id, RESPONDER_NAME);
+            if (result.changed && result.responder_token) saveToken(incident.id, result.responder_token);
+            return result;
+          })}>
             Accept request
+          </button>
+        )}
+        {incident.status === "acknowledged" && !incident.on_my_way_at && tokenFor(incident.id) && (
+          <button className="btn primary huge" disabled={busy} onClick={() => onAction(() => api.onMyWay(incident.id, tokenFor(incident.id)!))}>
+            On my way
           </button>
         )}
         {incident.status === "acknowledged" && (
@@ -133,6 +156,7 @@ function IncidentCard({ incident, onAction, busy }: { incident: Incident; onActi
           </button>
         )}
       </div>
+      {incident.status === "acknowledged" && !incident.on_my_way_at && !tokenFor(incident.id) && <p className="hint">On my way can be sent only by the responder who accepted this request{incident.responder ? ` (${incident.responder})` : ""}, from the tab or iMessage conversation that accepted it.</p>}
     </article>
   );
 }
@@ -154,12 +178,14 @@ export function ResponderPage() {
   const connection = useServerEvents(onEvent, () => { void list.refresh(); });
   useEffect(() => {
     if (!list.data) return;
-    const current = new Map(list.data.map(i => [i.id, i.status]));
+    const current = new Map(list.data.map(i => [i.id, `${i.status}${i.on_my_way_at ? "+on_my_way" : ""}`]));
     if (seen.current) for (const i of list.data) {
       const previous = seen.current.get(i.id);
-      if (previous === i.status) continue;
-      if (ownChange.current?.id === i.id && ownChange.current.status === i.status) { ownChange.current = null; continue; }
-      if (i.status === "dispatched") setNotice(`New dispatched request near ${i.location.landmark ?? "unknown landmark"}.`);
+      const now = current.get(i.id)!;
+      if (previous === now) continue;
+      if (ownChange.current?.id === i.id && ownChange.current.status === now) { ownChange.current = null; continue; }
+      if (previous === "acknowledged" && now === "acknowledged+on_my_way") setNotice(`${i.responder ?? "The assigned responder"} reported On my way.`);
+      else if (i.status === "dispatched") setNotice(`New dispatched request near ${i.location.landmark ?? "unknown landmark"}.`);
       else if (i.status === "cancelled") setNotice("A request was canceled by the user.");
       else if (i.status === "acknowledged") setNotice("A responder accepted a request.");
       else if (i.status === "resolved") setNotice("A request was marked resolved.");
@@ -170,8 +196,8 @@ export function ResponderPage() {
     if (lock.current || list.error || stale) return;
     lock.current = true; setBusy(true); setActionError(null);
     try {
-      const result = await fn() as { changed?: boolean; incident?: { id: string; status: string } };
-      if (result.incident) ownChange.current = { id: result.incident.id, status: result.incident.status };
+      const result = await fn() as { changed?: boolean; incident?: { id: string; status: string; on_my_way_at?: string | null } };
+      if (result.incident) ownChange.current = { id: result.incident.id, status: `${result.incident.status}${result.incident.on_my_way_at ? "+on_my_way" : ""}` };
       setNotice(result.changed === false ? "Already handled. Current server state is shown." : "Server confirmed the action.");
     } catch (e) { setActionError(e instanceof ApiError ? e.message : "Server confirmation unavailable. Refresh the queue before trying again."); }
     finally { await list.refresh(); lock.current = false; setBusy(false); }

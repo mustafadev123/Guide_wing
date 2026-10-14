@@ -287,3 +287,19 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
   - `scripts/voice_browser_check.cjs` **33/33** in headless Edge against an isolated backend with a mock recognizer
   - existing `web_browser_check.cjs` **46/46** (focus check adjusted for the new last control)
 - **Unverified:** real-microphone recognition and audible playback on the demo laptop; live iMessage round trip. See [VOICE_COMMANDS.md](VOICE_COMMANDS.md) and [LINKEDIN_VIDEO_SCRIPT.md](LINKEDIN_VIDEO_SCRIPT.md).
+
+## 2026-10-14: Checkpoints, "On my way", readiness feedback (branch `voice-commands`, uncommitted)
+
+- **Checkpoints:** spoken once per journey from the backend `waypoint_index`. A skipped boundary is merged into one sentence. Refresh, reconnect and a new journey don't replay. Paused or ended journeys stay silent. Labeled "simulated route".
+- **On my way:**
+  - `POST /api/incidents/{id}/on-my-way` with the `responder_token` returned once by the winning accept (SHA-256 stored). Status stays acknowledged.
+  - Additive `on_my_way_at` field and DB columns, with migration for old databases.
+  - Desk button in the accepting tab only. iMessage `on my way`/`onmyway`, pushed once to other responders.
+  - User hears "Your responder says they are on the way." once.
+- **Readiness/failure:** camera (fresh frame + model; live/replay/test wording; silent while starting), server loss/recovery, and voice microphone readiness/failures. Announced once with hysteresis; optional narration never interrupts urgent or normal speech.
+- **Tests:**
+  - backend **104 passed**
+  - iMessage agent **18/18** plus typecheck
+  - frontend Node **31/31**
+  - `feedback_browser_check.cjs` **35/35**, `voice_browser_check.cjs` **33/33**, `web_browser_check.cjs` **46/46**
+- **Unverified:** audible playback, real camera loss and recovery, live iMessage `on my way`. See [ROUTE_AND_READINESS_FEEDBACK.md](ROUTE_AND_READINESS_FEEDBACK.md).
