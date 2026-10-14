@@ -71,6 +71,18 @@ test('grammar requires the GuideWing prefix and one command word', () => {
   }
 });
 
+test('push-to-talk: the GuideWing prefix is optional, but the whole utterance must still be the command', () => {
+  for (const [said, cmd] of [['help', 'help'], ['Help!', 'help'], ['help me', 'help'], ['help please', 'help'], ['um cancel', 'cancel'],
+    ['Status.', 'status'], ['repeat', 'repeat'], ['GuideWing, help', 'help']]) {
+    assert.equal(parseCommand(said, false), cmd, said);
+    if (!/guide/i.test(said)) assert.equal(parseCommand(said), null, `prefix still required by default: ${said}`);
+  }
+  for (const said of ['help me find the exit', 'please help', 'I need help', 'cancel that order', 'press help', 'helpful', '',
+    'Journey started. Press Help, or hold an open palm for two seconds when camera recognition is ready.']) {
+    assert.equal(parseCommand(said, false), null, said);
+  }
+});
+
 test('low reported confidence never yields a command; unreported (0) confidence relies on the strict grammar', () => {
   assert.equal(pickCommand([{ transcript: 'guidewing help', confidence: 0.3 }]).command, null);
   assert.equal(pickCommand([{ transcript: 'guidewing help', confidence: 0.3 }]).reason, 'low-confidence');
@@ -111,6 +123,31 @@ test('one spoken Help runs the command once; duplicate final results are ignored
   assert.deepEqual(h.commands, ['help']);
   assert.equal(requests, 1);
   assert.equal(h.ctl.snapshot.lastHeard.transcript, 'GuideWing, help');
+});
+
+test('bare words work for a push-to-talk session (including its duplicate result) but not in continuous listening', async () => {
+  const h = harness();
+  await h.ctl.enable();
+  h.ctl.pushToTalk(); h.advance(300);
+  h.rec.say('help');
+  h.rec.say('help'); // duplicate final result in the same session: ignored quietly
+  await h.flush();
+  assert.deepEqual(h.commands, ['help']);
+  assert.doesNotMatch(h.ctl.snapshot.message, /Nothing was changed/);
+  h.rec.end();
+  h.ctl.setContinuous(true); h.advance(1000);
+  h.rec.say('status');
+  h.rec.say('cancel');
+  await h.flush();
+  assert.deepEqual(h.commands, ['help']);
+  h.ctl.pushToTalk(); // V during continuous listening: the next result may be bare
+  h.rec.say('status');
+  await h.flush();
+  assert.deepEqual(h.commands, ['help', 'status']);
+  h.advance(DUPLICATE_WINDOW_MS + 1);
+  h.rec.say('repeat'); // back to requiring the prefix
+  await h.flush();
+  assert.deepEqual(h.commands, ['help', 'status']);
 });
 
 test('a second command while one is processing does not run', async () => {

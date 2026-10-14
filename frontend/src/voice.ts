@@ -14,25 +14,32 @@ export interface Alternative { transcript: string; confidence: number }
 
 /** Below this reported confidence a final result never runs a command. 0 means the browser did not report one. */
 export const MIN_CONFIDENCE = 0.5;
-const PREFIX = /^(?:(?:hey|ok|okay|um|uh)\s+)*(?:guide\s?wings?|guidewings?)\s+/;
-const COMMANDS: Record<string, VoiceCommand> = { help: "help", cancel: "cancel", status: "status", repeat: "repeat" };
+const FILLER = /^(?:(?:hey|ok|okay|um|uh)\s+)*/;
+const PREFIX = /^(?:guide\s?wings?|guidewings?)\s+/;
+const COMMANDS: Record<string, VoiceCommand> = { help: "help", "help me": "help", cancel: "cancel", status: "status", repeat: "repeat" };
 
-/** Exact grammar: optional filler, the GuideWing prefix, one command word, optional "please". */
-export function parseCommand(transcript: string): VoiceCommand | null {
-  const text = transcript.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+/**
+ * Exact grammar: the whole utterance is one command word (optional filler before, "please" after).
+ * requirePrefix (default, and always for continuous listening): it must start with "GuideWing".
+ * Push-to-talk passes false, because pressing V already shows intent: then "help" alone is enough,
+ * but "help me find the exit" is still not a command.
+ */
+export function parseCommand(transcript: string, requirePrefix = true): VoiceCommand | null {
+  let text = transcript.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  text = text.replace(FILLER, "");
   const m = PREFIX.exec(text);
-  if (!m) return null;
-  const rest = text.slice(m[0].length).replace(/\s+please$/, "");
-  return COMMANDS[rest] ?? null;
+  if (m) text = text.slice(m[0].length);
+  else if (requirePrefix) return null;
+  return COMMANDS[text.replace(/\s+please$/, "")] ?? null;
 }
 
 export type Heard = { transcript: string; command: VoiceCommand | null; confidence: number; reason?: string };
 
 /** Picks the first alternative that parses with acceptable confidence; otherwise reports why nothing ran. */
-export function pickCommand(alternatives: Alternative[], min = MIN_CONFIDENCE): Heard {
+export function pickCommand(alternatives: Alternative[], min = MIN_CONFIDENCE, requirePrefix = true): Heard {
   const top = alternatives[0] ?? { transcript: "", confidence: 0 };
   for (const alt of alternatives) {
-    const command = parseCommand(alt.transcript);
+    const command = parseCommand(alt.transcript, requirePrefix);
     if (!command) continue;
     if (alt.confidence > 0 && alt.confidence < min) return { transcript: alt.transcript, command: null, confidence: alt.confidence, reason: "low-confidence" };
     return { transcript: alt.transcript, command, confidence: alt.confidence };
@@ -155,7 +162,7 @@ export class VoiceController {
     this.supported = !!this.recognizer;
     if (this.recognizer) this.wire(this.recognizer);
     this.snap = { state: this.supported ? "off" : "unsupported", enabled: false, continuous: false, lastHeard: null,
-      message: this.supported ? "Voice commands are off." : "Voice commands are not supported in this browser. Buttons, keyboard and gestures still work." };
+      message: this.supported ? "Voice commands are off. Press V or Speak a command to start." : "Voice commands are not supported in this browser. Buttons, keyboard and gestures still work." };
   }
 
   get snapshot() { return this.snap; }
@@ -172,7 +179,7 @@ export class VoiceController {
     }
     this.enabled = true;
     this.rapidEnds = 0;
-    this.update("ready", this.continuous ? "Voice on. Listening for GuideWing commands." : "Voice on. Press Speak a command, then say a GuideWing command.");
+    this.update("ready", this.continuous ? "Voice on. Listening for GuideWing commands." : "Voice on. Press V or Speak a command, then say help, cancel, status or repeat.");
     if (this.continuous) this.scheduleStart(0);
   }
 
@@ -181,7 +188,7 @@ export class VoiceController {
     this.cancelRestart();
     this.endSession("abort");
     this.sessionActive = false;
-    this.update(this.supported ? "off" : "unsupported", this.supported ? "Voice commands are off." : this.snap.message);
+    this.update(this.supported ? "off" : "unsupported", this.supported ? "Voice commands are off. Press V or Speak a command to start." : this.snap.message);
   }
 
   setContinuous(on: boolean) {
@@ -198,7 +205,7 @@ export class VoiceController {
     if (!this.enabled || this.fatal || this.processing) return false;
     this.wantSingle = true;
     this.cancelRestart();
-    if (this.sessionActive && !this.ending) { this.update("listening", "Listening. Say a GuideWing command."); return true; }
+    if (this.sessionActive && !this.ending) { this.update("listening", "Listening. Say help, cancel, status or repeat."); return true; }
     if (!this.sessionActive) this.scheduleStart(Math.max(0, this.speechEndedAt + 250 - this.now()));
     // else: the closing session's onend starts a fresh one
     return true;
@@ -234,7 +241,7 @@ export class VoiceController {
   private wire(r: Recognizer) {
     r.onstart = () => {
       this.sessionActive = true; this.sessionStarted = this.now(); this.sessionTainted = false;
-      this.update("listening", this.wantSingle ? "Listening. Say a GuideWing command." : "Listening for GuideWing commands.");
+      this.update("listening", this.wantSingle ? "Listening. Say help, cancel, status or repeat." : "Listening for GuideWing commands.");
     };
     r.onresult = alts => this.handleResult(alts);
     r.onerror = code => {
@@ -276,7 +283,8 @@ export class VoiceController {
 
   private handleResult(alts: Alternative[]) {
     if (!this.enabled || this.fatal) return;
-    const heard = pickCommand(alts);
+    // A push-to-talk press shows intent, so the "GuideWing" prefix is optional for that session (or the next result).
+    const heard = pickCommand(alts, MIN_CONFIDENCE, !(this.wantSingle || this.singleSession));
     const t = this.now();
     // Results from a session that overlapped app speech, or arriving with no session open, may be our own voice.
     if (this.speaking || this.sessionTainted || !this.sessionActive) return;
@@ -330,7 +338,7 @@ export class VoiceController {
     this.update("error", message);
   }
 
-  private idleMessage() { return this.continuous ? "Listening for GuideWing commands." : "Voice on. Press Speak a command, then say a GuideWing command."; }
+  private idleMessage() { return this.continuous ? "Listening for GuideWing commands." : "Voice on. Press V or Speak a command, then say help, cancel, status or repeat."; }
 
   private update(state: VoiceState, message: string, heard?: Heard) {
     this.snap = { state, enabled: this.enabled, continuous: this.continuous, lastHeard: heard ?? this.snap?.lastHeard ?? null, message };

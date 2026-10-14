@@ -103,9 +103,12 @@ const count = async (page, re) => (await spoken(page)).filter((t) => re.test(t))
   check("Route end uses the end message, not a final checkpoint", said.some((t) => /end of the demo route/.test(t)) && !said.some((t) => /Bus stop on the simulated route/.test(t)), JSON.stringify(said));
 
   // new journey: tracking resets by UUID
+  const endedId = (await snap()).journey.id;
   await u.page.getByRole("button", { name: /Start a new journey/ }).click();
+  // wait for the NEW journey first: the ended one already has waypoint_index 3
+  await until(async () => { const j = (await snap()).journey; return j.id !== endedId && j.status === "active"; }, 10000);
   await until(async () => (await snap()).journey.waypoint_index >= 1, 20000);
-  check("A new journey announces its own checkpoints", await until(() => count(u.page, lib), 4000));
+  check("A new journey announces its own checkpoints", await until(() => count(u.page, lib), 4000), JSON.stringify((await spoken(u.page)).slice(-4)));
 
   // ---- on my way -----------------------------------------------------------------------------
   const before = (await spoken(u.page)).length;

@@ -2,14 +2,19 @@
 
 Voice commands are optional and off by default. Once enabled, they are the hands-free way to ask for help. Gestures, buttons, keyboard shortcuts and spoken feedback all keep working as before.
 
-| Say | Effect | Changes state? |
-|---|---|---|
-| "GuideWing, help" | Creates a help request (same path as the Help button) | Yes: backend request with `request_source: "voice"` |
-| "GuideWing, cancel" | Tries to cancel under the existing backend rules | Yes, only if the backend allows it |
-| "GuideWing, status" | Speaks journey and help-request status | No (read-only) |
-| "GuideWing, repeat" | Replays the latest announcement | No |
+Press **V** (or **Speak a command**), wait for the tone, then say the command.
 
-Every command must start with "GuideWing". This is **transcript matching against a fixed four-word vocabulary**, not a custom wake-word model and not conversational AI. Anything else ("help" alone, "GuideWing open the door", low-confidence results) is shown as "Nothing was changed" and does nothing.
+| Say after pressing V | Effect | Changes state? |
+|---|---|---|
+| "help" (or "help me", "GuideWing, help") | Creates a help request (same path as the Help button) | Yes: backend request with `request_source: "voice"` |
+| "cancel" | Tries to cancel under the existing backend rules | Yes, only if the backend allows it |
+| "status" | Speaks journey and help-request status | No (read-only) |
+| "repeat" | Replays the latest announcement | No |
+
+This is **transcript matching against a fixed four-word vocabulary**, not a wake-word model and not conversational AI. The whole utterance must be the command, with optional filler before ("um") and "please" after. "help me find the exit", "I need help" and low-confidence results show "Nothing was changed" and do nothing.
+
+- **Push-to-talk (after pressing V):** the "GuideWing" prefix is optional. Pressing the key already shows intent, and a single word is recognized faster and is not at risk of "GuideWing" being misheard.
+- **Keep listening (continuous):** every command must start with "GuideWing", because the microphone hears everything, including the app's own speech ("Press Help…").
 
 ## Recognition approach and its limits
 
@@ -43,8 +48,10 @@ Every command must start with "GuideWing". This is **transcript matching against
 ## Using it
 
 1. Start the backend as usual (`scripts\start.ps1`) and open **http://127.0.0.1:8000/user** in Edge on the laptop.
-2. On Home, in **Voice commands**, press **Enable voice**, and allow the microphone when the browser asks.
-3. **Push-to-talk (default, recommended for the demo):** press **Speak a command** (or the **V** key), then say "GuideWing, help". Pressing it while GuideWing is talking stops the speech first, so you can always interrupt.
+2. **One step:** press the **V** key (or **Speak a command**) anywhere on the page. If voice is off, this turns it on, asks for the microphone the first time, and starts listening. A short **tone** means "speak now". Then say "GuideWing, help". **Enable voice** still exists as an explicit switch.
+3. **Push-to-talk (default, recommended for the demo):** press V for every command. Pressing it while GuideWing is talking stops the speech first, so you can always interrupt. A key press also lets Edge play audio, so confirmations are audible even right after a reload.
+
+**Why not an always-listening wake phrase?** The microphone would have to stream room audio to the browser's speech service the whole time the page is open, a conversation or the app's own voice could trigger commands, and after a reload Edge blocks speech until the page is touched. One key press works from anywhere, needs no on-screen target, and maps to a headset or phone side button in a real product.
 4. **Keep listening (experimental):** listens continuously and pauses while GuideWing speaks. It is opt-in because its reliability on the demo laptop is unverified.
 5. **Status** is also a button and the **S** key. Repeat is a button and the **R** key.
 
@@ -70,7 +77,7 @@ The chair detector reports only that a chair overlaps the monitored camera regio
   - concurrent voice + gesture creates exactly one request
   - voice counted in analytics sources
 - iMessage agent: **15/15** tests and strict typecheck. The new integration test runs a voice-source request against the real backend: pushed to responders as "requested with a spoken voice command", then accepted and resolved by iMessage command.
-- `scripts/voice_browser_check.cjs` in headless Edge against an isolated backend: **33/33**. Recognition is a scripted mock and speech is a stub.
+- `scripts/voice_browser_check.cjs` in headless Edge against an isolated backend: **38/38**, stable over repeated runs. This includes one-step V with voice off (listens, plays the tone, no readiness speech delay, voice Help created) and V in an unsupported browser (explains, points to Help). Recognition is a scripted mock and speech is a stub.
   - one spoken Help creates exactly one request, with `voice` source and confirmation after the backend
   - a duplicate final result creates nothing extra
   - Status and Repeat leave journey and request versions unchanged
@@ -88,7 +95,7 @@ The chair detector reports only that a chair overlaps the monitored camera regio
 
 Run these with the real microphone and speakers before recording:
 
-1. **Permission:** press Enable voice and allow the microphone. The chip shows "Ready". Deny once in a private window: a clear "denied" message, and Help/Cancel still work.
+1. **Permission:** with voice off, press V and allow the microphone. You should hear a tone and see "Listening". The chip shows "Ready". Deny once in a private window: a clear "denied" message, and Help/Cancel still work.
 2. **Recognition:** start a journey, press Speak a command, say "GuideWing, help". Expect "Last heard: …" with `command: help`, the spoken confirmation, and the request on `/responder` labeled "Voice command". If the transcript differs, note the exact text shown. "Guide wing", "GuideWing" and "Guide wings" are accepted.
 3. **Duplicate:** say "GuideWing, help" twice quickly. Only one request appears.
 4. **Self-hearing:** with speakers loud and Keep listening on, press Status (the app speaks). No request is created by the app's own voice.

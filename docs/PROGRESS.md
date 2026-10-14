@@ -303,3 +303,11 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
   - frontend Node **31/31**
   - `feedback_browser_check.cjs` **35/35**, `voice_browser_check.cjs` **33/33**, `web_browser_check.cjs` **46/46**
 - **Unverified:** audible playback, real camera loss and recovery, live iMessage `on my way`. See [ROUTE_AND_READINESS_FEEDBACK.md](ROUTE_AND_READINESS_FEEDBACK.md).
+
+## 2026-10-14: One-step voice (V turns voice on and listens)
+
+- Voice is still off by default. Pressing **V** or **Speak a command** with voice off now enables it, asks for the microphone if needed, and listens in one step, without the readiness speech that would delay listening. A short tone marks "speak now" for push-to-talk. In an unsupported browser, V explains and points to Help.
+- Decision: no always-on wake phrase, because of always-on cloud audio, false triggers, and Edge blocking audio after a reload. One key maps to a headset or side button in a real product.
+- Cancel refused because the request was accepted in the meantime now speaks "Already accepted. Only the responder can now resolve this request." instead of the raw server text.
+- Checks: `voice_browser_check.cjs` **38/38** (4 consecutive runs), `feedback_browser_check.cjs` **35/35** (3 runs; a new-journey race in the check fixed), `web_browser_check.cjs` **46/46**, frontend Node **31/31**.
+- **Push-to-talk without the prefix:** after pressing V, a bare "help", "cancel", "status" or "repeat" (the whole utterance) is accepted. This is faster, and there is no "GuideWing" for Edge to mishear. Continuous listening still requires "GuideWing". Frontend Node **33/33**; voice browser check **38/38** (3 runs, one-step flow now says just "help"); existing **46/46**.

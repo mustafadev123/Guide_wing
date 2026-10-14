@@ -80,7 +80,7 @@ All speech goes through the existing `Announcer`, which supports browser speech 
   - replay label
   - server loss announced once, Help blocked without claiming delivery, recovery once
   - no page errors
-- **Regression:** `voice_browser_check.cjs` 33/33 and `web_browser_check.cjs` 46/46.
+- **Regression:** `voice_browser_check.cjs` 38/38 and `web_browser_check.cjs` 46/46.
 
 ## Manual checks (UNVERIFIED until done on the demo devices)
 

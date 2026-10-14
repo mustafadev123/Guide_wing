@@ -26,6 +26,20 @@ const VOICE_STATE_LABEL: Record<VoiceState, string> = { unsupported: "Not suppor
 // Must never contain a spoken command phrase: announcements are not allowed to sound like "GuideWing, help".
 const OBSTACLE_MESSAGE = "Obstacle detected ahead. Please pause.";
 const ON_MY_WAY_MESSAGE = "Your responder says they are on the way.";
+// Short tone when push-to-talk starts listening, so the moment to speak is audible, not only visible.
+let cueContext: AudioContext | null = null;
+function playListeningCue() {
+  try {
+    cueContext ??= new AudioContext();
+    const t = cueContext.currentTime, osc = cueContext.createOscillator(), gain = cueContext.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    osc.connect(gain).connect(cueContext.destination);
+    osc.start(t); osc.stop(t + 0.16);
+  } catch { /* no Web Audio: the visible "Listening" state remains */ }
+}
 function readStored<T>(key: string, fallback: T): T {
   try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 }
@@ -68,6 +82,7 @@ export function UserPage() {
   const server = useMemo(() => new StableSignal<ServerSignal>(serverHold), []);
   const camera = useMemo(() => new StableSignal<CameraSignal>(cameraHold), []);
   const prevVoice = useRef<VoiceState | null>(null);
+  const oneStep = useRef(false); // voice was turned on by V / Speak a command: listen at once, skip the readiness speech
   const attempt = useRef<Attempt | null>(readStored<Attempt | null>("guidewing.helpAttempt", null));
   const snap = usePolling<SimulationState>(async () => {
     const s = await api.snapshot();
@@ -130,9 +145,11 @@ export function UserPage() {
     const prev = prevVoice.current;
     prevVoice.current = voiceSnap.state;
     if (prev === null || prev === voiceSnap.state) return;
+    if (voiceSnap.state === "listening" && !voiceSnap.continuous && feedback !== "text") playListeningCue();
+    if (oneStep.current && voiceSnap.state !== "permission") { oneStep.current = voiceSnap.state === "ready"; if (voiceSnap.state !== "error") return; }
     if (voiceSnap.state === "ready" && voiceSnap.enabled && ["off", "permission", "error"].includes(prev)) announcer.say("Voice commands on. Microphone access granted. Press Speak a command, or the V key, before each command.", "optional");
     else if (voiceSnap.state === "error") announcer.say(`Voice commands unavailable. ${voiceSnap.message}`);
-  }, [voiceSnap.state, voiceSnap.enabled, voiceSnap.message, announcer]);
+  }, [voiceSnap.state, voiceSnap.enabled, voiceSnap.continuous, voiceSnap.message, announcer, feedback]);
 
   useEffect(() => {
     if (!state) return;
@@ -214,6 +231,9 @@ export function UserPage() {
       announcer.say("Cancellation requested. Waiting for server confirmation.");
       const result = await api.cancel(active.id).catch(e => {
         if (!(e instanceof ApiError) || e.status >= 500) cancellationToConfirm.current = active.id;
+        // Accepted between this page's last update and the cancel: say it plainly, not the raw server text.
+        if (e instanceof ApiError && e.status === 409 && (e.body as { status?: string } | null)?.status === "acknowledged")
+          throw new ApiError(409, "Already accepted. Only the responder can now resolve this request.", e.body);
         throw e;
       });
       if (result.incident.status === "cancelled") announcer.announce(`incident:${active.id}:cancelled`, incidentMessage(result.incident));
@@ -238,10 +258,16 @@ export function UserPage() {
   };
   const status = () => { enableAudio(); announcer.say(statusText(), "optional"); };
   voiceHandlers.current = { help: () => help("voice"), cancel, status, repeat };
+  // One step: if voice is off, V / Speak a command turns it on (asking for the microphone if needed) and listens.
   const speakCommand = () => {
-    if (!voiceSnap.enabled) return;
+    if (!voiceCtl.supported) { explain("Voice commands are not supported in this browser. Use the Help button or the H key."); return; }
+    enableAudio();
     announcer.silence(); // barge-in: stop app speech so it cannot be heard as a command
-    voiceCtl.pushToTalk();
+    const current = voiceCtl.snapshot;
+    if (current.enabled) { voiceCtl.pushToTalk(); return; }
+    if (current.state === "permission") return;
+    oneStep.current = true;
+    void voiceCtl.enable().then(() => { if (voiceCtl.snapshot.enabled) voiceCtl.pushToTalk(); else oneStep.current = false; });
   };
   const toggleVoice = () => {
     if (voiceSnap.enabled) { voiceCtl.disable(); return; }
@@ -291,12 +317,12 @@ export function UserPage() {
             {journey?.status === "ended" && <><button className="btn primary" disabled={!!busy || !ready || !!active} onClick={startNew}>Start a new journey <Icon name="arrow" /></button>{active && <p className="hint">Cancel or resolve the active help request first.</p>}</>}
           </div></section>
           <section className="request-strip" aria-label="Help request status"><span className="status-dot" /><div><strong>{busy === "cancel" ? "Cancellation requested" : active ? STATUS_TEXT[active.status] : state?.last_incident ? `Last request: ${STATUS_TEXT[state.last_incident.status].toLowerCase()}` : "No active help request"}</strong><p aria-live="off">{secondsLeft !== null ? secondsLeft > 0 ? `${secondsLeft} seconds left to cancel before simulated dispatch.` : "Deadline reached. Waiting for the server dispatch confirmation." : active?.status === "acknowledged" ? active.on_my_way_at ? `${ON_MY_WAY_MESSAGE} No arrival time is available.` : "Acceptance is confirmed by the backend. The responder can mark the request resolved." : active?.status === "dispatched" ? "Cancel remains available until the request is accepted." : "Tap Help once. No holding is required."}</p>{(active ?? state?.last_incident) && <p className="hint">Requested with: {SOURCE_LABEL[(active ?? state!.last_incident!).request_source] ?? "unknown input"}</p>}</div></section>
-          <section className="voice-section" aria-labelledby="voice-title"><div className="voice-copy"><p className="eyebrow">Voice commands <span className={`status-chip voice-${voiceSnap.state}`}>{VOICE_STATE_LABEL[voiceSnap.state]}</span></p><h2 id="voice-title">Say &ldquo;GuideWing, help.&rdquo;</h2><p>{voiceSnap.message}</p><p className="hint">Commands: GuideWing help, cancel, status, repeat. Each must start with &ldquo;GuideWing&rdquo;. In Edge and Chrome, the browser sends microphone audio to its speech service; GuideWing saves no recordings or transcripts.</p>{voiceSnap.lastHeard && <p className="voice-heard">Last heard: &ldquo;{voiceSnap.lastHeard.transcript.trim()}&rdquo; &middot; {voiceSnap.lastHeard.command ? `command: ${voiceSnap.lastHeard.command}` : "no command"}</p>}</div>
+          <section className="voice-section" aria-labelledby="voice-title"><div className="voice-copy"><p className="eyebrow">Voice commands <span className={`status-chip voice-${voiceSnap.state}`}>{VOICE_STATE_LABEL[voiceSnap.state]}</span></p><h2 id="voice-title">Press V, then say &ldquo;help.&rdquo;</h2><p>{voiceSnap.message}</p><p className="hint">After pressing V, say just help, cancel, status or repeat (the whole phrase, nothing else). With Keep listening on, start each command with &ldquo;GuideWing&rdquo;. In Edge and Chrome, the browser sends microphone audio to its speech service; GuideWing saves no recordings or transcripts.</p>{voiceSnap.lastHeard && <p className="voice-heard">Last heard: &ldquo;{voiceSnap.lastHeard.transcript.trim()}&rdquo; &middot; {voiceSnap.lastHeard.command ? `command: ${voiceSnap.lastHeard.command}` : "no command"}</p>}</div>
             <div className="voice-action">{voiceSnap.state !== "unsupported" && <button className="btn" onClick={toggleVoice} aria-pressed={voiceSnap.enabled} disabled={voiceSnap.state === "permission"}>{voiceSnap.enabled ? "Disable voice" : "Enable voice"}</button>}{voiceSnap.enabled && <label className="checkbox-option"><input type="checkbox" checked={voiceSnap.continuous} onChange={e => voiceCtl.setContinuous(e.target.checked)} />Keep listening (experimental)</label>}</div></section>
           <details className="camera-details"><summary>Camera & hands-free help {v && <ModeBadge mode={v.input_mode} ready={v.ready} />}</summary><p>{v ? `${MODE_LABEL[v.input_mode]}. ${v.ready ? "Recognition running." : v.error ?? "Not ready."} ${v.ready ? v.gesture_armed ? "Hold an open palm for two seconds to request help." : "Lower your hand to re-arm open-palm help." : ""} ${v.obstruction_active ? "Obstruction detected in the monitored region." : ""}` : "Checking camera..."}</p><p className="hint">Button help works independently of camera recognition.</p>{v && ["live", "replay"].includes(v.input_mode) && <><button className="btn" onClick={() => setShowPreview(x => !x)} aria-expanded={showPreview}>{showPreview ? "Hide camera preview" : "Show camera preview"}</button>{showPreview && <img className="preview" src="/api/vision/stream" alt="Live annotated camera preview showing the monitored region and recognized objects and hands." />}</>}</details>
         </> : <section className="settings" aria-labelledby="settings-title"><p className="eyebrow">Make it yours</p><h1 id="settings-title">Settings</h1><fieldset><legend>How you hear updates</legend><p>Choose one announcement channel to avoid hearing the same update twice.</p>{([["voice", "Spoken feedback", "Browser speech, or the configured server voice. Starts after a button or keyboard interaction."], ["screen-reader", "Screen reader", "Announce updates through TalkBack or your screen reader. App speech is off."], ["text", "Text only", "Keep messages visible without automatic spoken updates."]] as const).map(([value, label, hint]) => <label className="radio-option" key={value}><input type="radio" name="feedback" value={value} checked={feedback === value} onChange={() => changeFeedback(value)} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</fieldset>
           <label className="checkbox-option"><input type="checkbox" checked={shortcutsOn} onChange={e => { setShortcutsOn(e.target.checked); store("guidewing.shortcuts", e.target.checked); }} />Enable single-key shortcuts (H, C, R, P, S, V)</label><section className="settings-section"><h2>Connected to the prototype</h2><p>The FastAPI backend stores requests, owns the 10-second window, and confirms responder actions. Dispatch and location are simulated. No real emergency service is contacted.</p><p>Sign-in is not implemented in this source project. No assistance service or account provider is implied.</p><a href="/responder">Open responder desk</a> ? <a href="/sim">Open 2D simulation</a></section>
-          <section className="settings-section"><h2>Journey & browser limits</h2><p>The backend ends the route when progress reaches 100%. Ending or pausing a journey does not cancel an existing help request.</p>{journey && ["active", "paused"].includes(journey.status) && <button className="btn" disabled={!!busy || !ready} onClick={() => { void run("journey", () => api.journeyAction(journey.id, "end")); }}>End journey</button>}<p>Keep this page open for spoken acknowledgment. After submission, the running backend owns dispatch even if this tab is suspended. The browser cannot guarantee audio or gesture delivery while closed. Refresh restores server state and never sends a request automatically.</p><p className="hint">Keyboard: H Help / C or Escape Cancel / R Repeat / S Status / V Speak a voice command / P Pause or Resume. Tab and Enter also work on every control.</p><p>Voice commands are optional and off until you enable them on Home. Recognition pauses while GuideWing speaks, so &ldquo;GuideWing, cancel&rdquo; may be missed during an announcement: press Speak a command (V) to interrupt, or use Cancel or Escape, which always work.</p></section>
+          <section className="settings-section"><h2>Journey & browser limits</h2><p>The backend ends the route when progress reaches 100%. Ending or pausing a journey does not cancel an existing help request.</p>{journey && ["active", "paused"].includes(journey.status) && <button className="btn" disabled={!!busy || !ready} onClick={() => { void run("journey", () => api.journeyAction(journey.id, "end")); }}>End journey</button>}<p>Keep this page open for spoken acknowledgment. After submission, the running backend owns dispatch even if this tab is suspended. The browser cannot guarantee audio or gesture delivery while closed. Refresh restores server state and never sends a request automatically.</p><p className="hint">Keyboard: H Help / C or Escape Cancel / R Repeat / S Status / V Speak a voice command / P Pause or Resume. Tab and Enter also work on every control.</p><p>Voice commands are optional and off until you press V or Speak a command, which turns them on and listens in one step (a tone means "speak now"). Recognition pauses while GuideWing speaks, so &ldquo;GuideWing, cancel&rdquo; may be missed during an announcement: press Speak a command (V) to interrupt, or use Cancel or Escape, which always work.</p></section>
         </section>}
         <div className="connection-row"><ConnectionBadge connection={connection} error={snap.error || (state && stale ? "Stale state" : null)} />{(!ready && state) && <button className="text-button" onClick={() => { void snap.refresh(); }}>Retry connection</button>}<p>Demonstration only. No real help service or physical drone is connected.</p></div>
         {attempt.current && !active && <p className="warn">A previous Help attempt has no confirmation. Pressing Help explicitly retries the same request key; refresh never retries it.</p>}
@@ -306,7 +332,7 @@ export function UserPage() {
     <section className="action-area" aria-label="Assistance controls"><div className="content-width">
       <div className="latest-message"><svg className="message-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.4" /><circle cx="12" cy="12" r="5" fill="currentColor" /></svg><div><p className="eyebrow">Latest message</p><p aria-live={speechLive ? "polite" : "off"} aria-atomic="true"><span key={repeatCount}>{message}</span></p></div></div>
       <div className="primary-controls"><button className="btn help-button" onClick={() => { void help(); }} aria-disabled={!canHelp} aria-describedby="help-hint" aria-keyshortcuts="H"><Icon name="help" /><span>{busy === "help" ? "Requesting..." : "Help"}</span></button><button className="btn cancel-button" onClick={() => { void cancel(); }} aria-disabled={!canCancel} aria-describedby="cancel-hint" aria-keyshortcuts="C Escape"><Icon name="cancel" /><span>Cancel</span></button><button className="btn repeat-button" onClick={repeat} aria-keyshortcuts="R"><Icon name="repeat" /><span>Repeat last message</span></button></div>
-      <div className="secondary-controls"><button className="btn" onClick={status} aria-keyshortcuts="S">Status</button>{voiceSnap.enabled && <button className={`btn talk-button${voiceSnap.state === "listening" ? " listening" : ""}`} onClick={speakCommand} aria-keyshortcuts="V" aria-describedby="voice-live">{voiceSnap.state === "listening" ? "Listening..." : "Speak a command"}</button>}<p id="voice-live" className="hint" aria-live="polite">{voiceSnap.enabled || voiceSnap.state === "error" ? `Voice: ${VOICE_STATE_LABEL[voiceSnap.state].toLowerCase()}` : ""}</p></div>
+      <div className="secondary-controls"><button className="btn" onClick={status} aria-keyshortcuts="S">Status</button>{voiceSnap.state !== "unsupported" && <button className={`btn talk-button${voiceSnap.state === "listening" ? " listening" : ""}`} onClick={speakCommand} aria-keyshortcuts="V" aria-describedby="voice-live">{voiceSnap.state === "listening" ? "Listening..." : "Speak a command"}</button>}<p id="voice-live" className="hint" aria-live="polite">{voiceSnap.enabled || voiceSnap.state === "error" ? `Voice: ${VOICE_STATE_LABEL[voiceSnap.state].toLowerCase()}` : ""}</p></div>
       <div className="action-hints"><p id="help-hint">{helpBlocked ?? "Tap Help \u00b7 10 seconds to cancel"}</p><p id="cancel-hint">{cancelBlocked ?? "Cancel this request"}</p></div>
       {(speechNotice || (feedback === "voice" && !announcer.speechAvailable())) && <p className="hint" role="status">{speechNotice ?? "Speech is unavailable in this browser. Messages remain visible as text."}</p>}
     </div></section>

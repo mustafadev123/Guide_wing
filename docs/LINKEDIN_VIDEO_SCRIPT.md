@@ -30,7 +30,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start_imessage_agent.ps1       
 ```
 
 1. Edge: open http://127.0.0.1:8000/user, plus http://127.0.0.1:8000/responder in a second window. Use `/dev` → reset for a clean, idle journey.
-2. On `/user`, press **Enable voice** and allow the microphone. Leave **Keep listening** off and use **Speak a command**.
+2. On `/user`, press **V** once and allow the microphone (this turns voice on). Leave **Keep listening** off. During the recording, press **V** before each command and wait for the tone.
 3. Check the speaker volume. Keep the chair out of the camera region and your hands lowered.
 4. The responder phone texts `list` to the Photon line once (required after every agent restart).
 5. Optional: start a screen recorder that captures system audio, so the spoken announcements are in the video.
@@ -44,7 +44,7 @@ Checkpoint → real chair warning → voice Help → actual iMessage acceptance 
 | 0:00-0:08 | `/user` Home | Click **Start journey**. "Camera ready. Live chair and open-palm recognition is running." may already have played | "GuideWing is a prototype companion for blind and low-vision pedestrians. This journey and its location are simulated." |
 | 0:08-0:22 | `/user`, `/sim` optional | Let the simulated route reach the first checkpoint | (App: "You've reached Library crossing on the simulated route.") "Checkpoints come from the simulated route on the server." |
 | 0:22-0:34 | Camera preview | Slide a real chair into the camera region, wait for the warning and the paused state, remove the chair | (App: "Obstacle detected ahead. Please pause.") "A live camera detects the chair and pauses. It says something is ahead; it doesn't give directions." |
-| 0:34-0:46 | Voice section | Press **Speak a command** and say **"GuideWing, help."** | (App: "Voice command received. Help request recorded. You have 10 seconds to cancel…") "Voice is the hands-free way in." |
+| 0:34-0:46 | Voice section | Press **V**, wait for the tone, and say **"help."** | (App: "Voice command received. Help request recorded. You have 10 seconds to cancel…") "Voice is the hands-free way in." |
 | 0:46-0:58 | iPhone | The iMessage arrives after 10 s. Reply `accept` | (App: "A responder accepted your request.") "A registered responder accepts by iMessage." |
 | 0:58-1:10 | iPhone, then `/user` | Reply `on my way` | (App: "Your responder says they are on the way.") "Only the responder who accepted can send that, and it carries no arrival time." |
 | 1:10-1:15 | End card | Reply `resolved` off camera | "Simulated journey and dispatch. Not an emergency service." |
@@ -55,7 +55,7 @@ Checkpoint → real chair warning → voice Help → actual iMessage acceptance 
 |---|---|---|---|
 | 0:00-0:08 | `/user` Home | Click **Start journey** | "GuideWing is a prototype companion for blind and low-vision pedestrians. The journey and location here are simulated." |
 | 0:08-0:22 | Camera preview open | Slide a real chair into the camera region. Wait for the spoken warning and the paused state. Remove the chair, then **Resume journey** | (Stay silent for the warning: "Obstacle detected ahead. Please pause.") "A live camera detects the chair and pauses the journey. It only says something is ahead; it doesn't give directions." |
-| 0:22-0:35 | Voice section | Press **Speak a command** and say **"GuideWing, help."** Show "Last heard" and the countdown | (App: "Voice command received. Help request recorded. You have 10 seconds to cancel…") "Voice is the hands-free way in. The server owns the 10-second cancel window." |
+| 0:22-0:35 | Voice section | Press **V**, wait for the tone, and say **"help."** Show "Last heard" and the countdown | (App: "Voice command received. Help request recorded. You have 10 seconds to cancel…") "Voice is the hands-free way in. The server owns the 10-second cancel window." |
 | 0:35-0:48 | iPhone | The iMessage arrives after the 10 seconds | "Once the window closes, the request goes to a registered responder over iMessage." |
 | 0:48-0:58 | iPhone, then `/user` | Reply `accept`, then show `/user` | (App: "A responder accepted your request.") "The responder accepts by text, and the user hears it." |
 | 0:58-1:08 | `/user`, camera | Responder replies `resolved`. Then hold an open palm for 2 s to show the backup, and press **Cancel** within the window | "Gestures and buttons remain as backups. Cancel works the same way however the request was made." |

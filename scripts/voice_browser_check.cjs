@@ -50,6 +50,12 @@ const MOCKS = ({ recognition, micDenied }) => {
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
     getUserMedia: () => micDenied ? Promise.reject(Object.assign(new Error("denied"), { name: "NotAllowedError" })) : Promise.resolve({ getTracks: () => [{ stop() {} }] }),
   } });
+  window.__cues = 0;
+  window.AudioContext = class {
+    constructor() { this.currentTime = 0; this.destination = {}; }
+    createOscillator() { window.__cues++; return { frequency: {}, connect: (n) => n, start() {}, stop() {} }; }
+    createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (n) => n }; }
+  };
   delete window.SpeechRecognition; delete window.webkitSpeechRecognition;
   if (!recognition) return;
   window.__rec = { starts: 0, aborts: 0, active: null };
@@ -191,7 +197,7 @@ const quiet = (page) => until(() => page.evaluate(() => !window.__speaking), 500
   await until(async () => (await snap()).active_incident?.status === "acknowledged");
   await quiet(page);
   await speak(page, "guidewing cancel");
-  await sleep(1200);
+  await until(async () => (await spoken(page)).some((t) => /Only the responder can now resolve/.test(t)), 5000);
   check("Voice Cancel after acceptance is refused and the request stays accepted",
     (await api("GET", `/api/incidents/${raced.id}`)).body.status === "acknowledged" && (await spoken(page)).some((t) => /Only the responder can now resolve/.test(t)),
     `${(await api("GET", `/api/incidents/${raced.id}`)).body.status} ${JSON.stringify((await spoken(page)).slice(-3))} ${await voiceText(page)}`);
@@ -211,6 +217,22 @@ const quiet = (page) => until(() => page.evaluate(() => !window.__speaking), 500
   check("No page errors in the voice session", errors.length === 0, errors.join(" / "));
   await page.context().close();
 
+  // ---- one step: V turns voice on and listens ---------------------------------------------
+  const os = await openUser(browser, { recognition: true, micDenied: false });
+  await startJourney(os.page);
+  await until(() => os.page.evaluate(() => !window.__speaking), 5000, 50);
+  const osBefore = (await incidents()).length;
+  const osSpoken = (await spoken(os.page)).length;
+  await os.page.keyboard.press("v"); // voice is off
+  const osListening = await until(async () => (await os.page.evaluate(() => !!window.__rec.active)) && /Listening/.test(await voiceText(os.page)), 5000, 50);
+  check("V with voice off: microphone granted and listening in one step", osListening && /Listening/.test(await voiceText(os.page)),
+    `${osListening} ${await os.page.evaluate(() => JSON.stringify({ starts: window.__rec.starts, aborts: window.__rec.aborts, spoken: window.__spoken }))} ${(await voiceText(os.page)).split(String.fromCharCode(10)).filter(Boolean).slice(1, 3).join(" / ")}`);
+  check("A tone marks the moment to speak", (await os.page.evaluate(() => window.__cues)) >= 1);
+  check("No long readiness speech delays the one-step listen", !(await spoken(os.page)).slice(osSpoken).some((t) => /Voice commands on/.test(t)));
+  await os.page.evaluate(() => window.__say("help")); // bare word: allowed after pressing V
+  check("One-step V then just 'help' creates one voice request", await until(async () => (await incidents()).length - osBefore === 1 && (await incidents())[0].request_source === "voice", 5000));
+  await os.ctx.close();
+
   // ---- unsupported browser ---------------------------------------------------------------
   const un = await openUser(browser, { recognition: false });
   await startJourney(un.page);
@@ -222,6 +244,8 @@ const quiet = (page) => until(() => page.evaluate(() => !window.__speaking), 500
   await until(async () => /Cancellation window/.test(await un.page.locator(".request-strip").innerText()), 5000);
   await un.page.keyboard.press("c");
   check("Unsupported browser: keyboard Cancel still works", await until(async () => (await snap()).last_incident?.status === "cancelled"));
+  await un.page.keyboard.press("v");
+  check("Unsupported browser: V explains and points to Help", await until(async () => (await spoken(un.page)).some((t) => /not supported in this browser\. Use the Help button or the H key/.test(t)), 3000));
   await un.ctx.close();
 
   // ---- denied microphone -------------------------------------------------------------------
