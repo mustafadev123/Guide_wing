@@ -13,7 +13,7 @@ SCHEMA_VERSION = 1
 JourneyStatus = Literal["idle", "active", "paused", "ended"]
 PauseReason = Literal["user", "obstruction", "help_request"]
 IncidentStatus = Literal["pending", "dispatched", "acknowledged", "cancelled", "resolved"]
-RequestSource = Literal["gesture", "button", "test", "imessage"]
+RequestSource = Literal["gesture", "button", "test", "imessage", "voice"]
 LocationSource = Literal["simulated", "device", "unavailable"]
 InputMode = Literal["live", "replay", "test", "unavailable"]
 

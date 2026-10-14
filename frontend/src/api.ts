@@ -4,7 +4,11 @@ export type LocationSource = "simulated" | "device" | "unavailable";
 export type JourneyStatus = "idle" | "active" | "paused" | "ended";
 export type IncidentStatus = "pending" | "dispatched" | "acknowledged" | "cancelled" | "resolved";
 export type InputMode = "live" | "replay" | "test" | "unavailable";
-export type RequestSource = "gesture" | "button" | "test" | "imessage";
+export type RequestSource = "gesture" | "button" | "test" | "imessage" | "voice";
+
+export const SOURCE_LABEL: Record<RequestSource, string> = {
+  gesture: "Open-palm gesture (camera)", button: "Help button", test: "Developer test control", imessage: "iMessage text", voice: "Voice command",
+};
 
 export interface Location {
   source: LocationSource;
@@ -182,11 +186,11 @@ export const api = {
   createJourney: () => call<Journey>("POST", "/api/journeys"),
   journeyAction: (id: string, action: "start" | "pause" | "resume" | "end") =>
     call<Journey>("POST", `/api/journeys/${id}/${action}`),
-  requestHelp: (journeyId: string, requestKey: string) =>
+  requestHelp: (journeyId: string, requestKey: string, source: "button" | "voice" = "button") =>
     call<IncidentResult>("POST", "/api/incidents", {
       journey_id: journeyId,
       request_key: requestKey,
-      request_source: "button",
+      request_source: source,
     }),
   incidents: (limit = 50) => call<Incident[]>("GET", `/api/incidents?limit=${Math.max(1, Math.min(500, limit))}`),
   incident: (id: string) => call<Incident & { timeline: { type: string; at: string; detail: string | null }[] }>("GET", `/api/incidents/${id}`),

@@ -31,7 +31,7 @@ pending --(10 s deadline, backend)--> dispatched --(responder accept)--> acknowl
 | GET | `/api/journeys/{id\|current}` | |
 | POST | `/api/journeys/{id\|current}/start` `/pause` `/resume` `/end` | 409 on an invalid transition |
 | POST | `/api/journeys/{id}/location` | Optional device location `{source: device\|unavailable, latitude, longitude, accuracy_m, landmark}`; validated (422) |
-| POST | `/api/incidents` | `{journey_id, request_key, request_source: button\|gesture\|test\|imessage}` → `{incident, created, changed}` (201 or 200) |
+| POST | `/api/incidents` | `{journey_id, request_key, request_source: button\|gesture\|test\|imessage\|voice}` → `{incident, created, changed}` (201 or 200) |
 | GET | `/api/incidents?status=&journey_id=&limit=` | Newest first |
 | GET | `/api/incidents/{id}` | Includes `timeline` |
 | POST | `/api/incidents/{id}/cancel` `/accept` `/resolve` | `accept` body `{responder}` is optional |

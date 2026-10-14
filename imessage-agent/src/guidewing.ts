@@ -2,7 +2,7 @@
 // plus the browser event stream (/ws/events) with automatic reconnection.
 
 export type IncidentStatus = "pending" | "dispatched" | "acknowledged" | "cancelled" | "resolved";
-export type RequestSource = "gesture" | "button" | "test" | "imessage";
+export type RequestSource = "gesture" | "button" | "test" | "imessage" | "voice";
 
 export interface Location {
   source: "simulated" | "device" | "unavailable";

@@ -266,3 +266,24 @@ Speech was observed by intercepting `speechSynthesis.speak`. That proves the pag
   - **Tests: 14/14** (12 unit + 2 against the real backend: a user requests through the API, responder A accepts and resolves, responder B is told; and the cancellation cases). Strict typecheck passes.
   - Backend request source `imessage` is kept but no longer used by the agent.
 
+
+## 2026-10-14: Optional voice commands on `/user` (branch `voice-commands`, uncommitted)
+
+- **New `frontend/src/voice.ts`:**
+  - fixed grammar "GuideWing, help / cancel / status / repeat", final results only, confidence threshold
+  - browser `SpeechRecognition` adapter
+  - `VoiceController`: push-to-talk, opt-in continuous listening, pause during app speech, restart backoff, error states
+- **`speech.ts`:** providers report speaking start/stop. `Announcer` has `urgent` / `normal` / `optional` priority and `silence()` for barge-in.
+- **`UserPage.tsx`:**
+  - Voice section (Enable/Disable, Keep listening, last heard), Status button (S) and Speak a command (V)
+  - voice uses the same `help` / `cancel` / `repeat` handlers as the buttons
+  - shows which input made the request
+  - obstacle speech is now "Obstacle detected ahead. Please pause."
+- **Additive source `voice`:** schema, briefing text, Gemini incident facts, analytics source counts and sentence, responder labels, iMessage agent wording. Existing rows are unchanged.
+- **Tests:**
+  - backend **97 passed**
+  - frontend Node **20/20** (15 new voice tests)
+  - iMessage agent **15/15** plus typecheck
+  - `scripts/voice_browser_check.cjs` **33/33** in headless Edge against an isolated backend with a mock recognizer
+  - existing `web_browser_check.cjs` **46/46** (focus check adjusted for the new last control)
+- **Unverified:** real-microphone recognition and audible playback on the demo laptop; live iMessage round trip. See [VOICE_COMMANDS.md](VOICE_COMMANDS.md) and [LINKEDIN_VIDEO_SCRIPT.md](LINKEDIN_VIDEO_SCRIPT.md).

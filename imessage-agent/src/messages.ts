@@ -14,6 +14,7 @@ const VIA: Record<RequestSource, string> = {
   gesture: "an open-palm gesture",
   button: "the Help button",
   imessage: "an iMessage text",
+  voice: "a spoken voice command",
   test: "a developer TEST control (TEST request)",
 };
 
@@ -32,7 +33,7 @@ export function age(iso: string | null, now = Date.now()): string {
 const clock = (iso: string | null) => (iso ? `${iso.slice(11, 19)} UTC` : "not recorded");
 
 export const newRequest = (i: Incident) =>
-  `New help request near ${where(i)}, requested with ${VIA[i.request_source]}. Reply ACCEPT to take it, or DETAILS for more.`;
+  `New help request near ${where(i)}, requested with ${VIA[i.request_source] ?? "an unrecognized input"}. Reply ACCEPT to take it, or DETAILS for more.`;
 export const youAccepted = (i: Incident) =>
   `You accepted the request near ${where(i)}. The user has been told a responder accepted. Reply RESOLVED when it is handled.`;
 export const acceptedByOther = (i: Incident) =>
@@ -48,7 +49,7 @@ export const pendingNote = (i: Incident) =>
 export function details(i: Incident): string {
   return [
     `Request near ${where(i)}${i.is_test ? " (TEST)" : ""}.`,
-    `Status: ${i.status}. Requested with ${VIA[i.request_source]}.`,
+    `Status: ${i.status}. Requested with ${VIA[i.request_source] ?? "an unrecognized input"}.`,
     `Requested ${clock(i.created_at)}, dispatched ${clock(i.dispatched_at)}${i.acknowledged_at ? `, accepted ${clock(i.acknowledged_at)} by ${i.responder}` : ""}.`,
     i.snapshot_url ? "A blurred camera snapshot is on the responder desk." : "No camera snapshot.",
     "Location is from the simulated demo route.",

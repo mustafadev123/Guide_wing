@@ -34,6 +34,7 @@ class DeterministicBriefing:
             "gesture": "Requested with a held open-palm gesture.",
             "button": "Requested with the Help button.",
             "imessage": "Requested by an iMessage text to the GuideWing agent.",
+            "voice": "Requested with a spoken \"GuideWing, help\" voice command.",
             "test": "TEST request injected by a developer control.",
         }[incident.request_source]
         lines = [

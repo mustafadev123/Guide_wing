@@ -250,3 +250,48 @@ def test_imessage_request_source_is_accepted_and_labeled(h):
     assert inc["request_source"] == "imessage" and inc["is_test"] is False
     assert "iMessage" in h.client.get(f"/api/incidents/{inc['id']}/briefing").json()["deterministic"]
     assert h.request_help(jid, key="imessage-msg-0001", source="imessage").status_code == 200  # same message id: same request
+
+
+def test_voice_request_source_is_accepted_labeled_and_idempotent(h):
+    jid = h.start()
+    r = h.request_help(jid, key="voice-0123456789abcdef", source="voice")
+    assert r.status_code == 201
+    inc = r.json()["incident"]
+    assert inc["request_source"] == "voice" and inc["is_test"] is False and inc["status"] == "pending"
+    assert "voice command" in h.client.get(f"/api/incidents/{inc['id']}/briefing").json()["deterministic"]
+    again = h.request_help(jid, key="voice-0123456789abcdef", source="voice")  # duplicate final result / retry
+    assert again.status_code == 200 and again.json()["incident"]["id"] == inc["id"] and again.json()["created"] is False
+    assert len(h.client.get("/api/incidents").json()) == 1
+    h.tick(10.5)  # voice requests follow the same backend-owned deadline
+    assert h.client.get(f"/api/incidents/{inc['id']}").json()["status"] == "dispatched"
+
+
+def test_voice_after_gesture_does_not_duplicate(h):
+    jid = h.start()
+    h.svc._on_palm_hold(jid, "gesture")
+    r = h.request_help(jid, key="voice-after-gesture-01", source="voice")
+    assert r.status_code == 409 and r.json()["active_incident_id"]
+    incidents = h.client.get("/api/incidents").json()
+    assert [i["request_source"] for i in incidents] == ["gesture"]
+
+
+def test_concurrent_voice_and_gesture_create_one_request(h):
+    jid = h.start()
+    barrier = threading.Barrier(2)
+    codes = []
+
+    def voice():
+        barrier.wait()
+        codes.append(h.request_help(jid, key="voice-concurrent-0001", source="voice").status_code)
+
+    def gesture():
+        barrier.wait()
+        h.svc._on_palm_hold(jid, "gesture")  # swallows its own 409
+
+    ts = [threading.Thread(target=voice), threading.Thread(target=gesture)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    incidents = h.client.get("/api/incidents").json()
+    assert len(incidents) == 1
+    assert codes[0] == (201 if incidents[0]["request_source"] == "voice" else 409)
+

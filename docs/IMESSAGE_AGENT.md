@@ -3,7 +3,7 @@
 The iMessage agent lets a registered **responder** work help requests from their phone instead of the `/responder` desk. When a user's request leaves the 10-second cancellation window, every registered responder gets a text. They reply `accept` to take it and `resolved` when it is handled. It is built on **Photon Spectrum** (`spectrum-ts`, MIT), which connects to Photon's hosted iMessage lines, so **no Mac is needed**.
 
 ```
-user (/user page: Help button or open palm) → GuideWing backend :8000 → /ws/events
+user (/user page: Help button, open palm or "GuideWing, help") → GuideWing backend :8000 → /ws/events
                                                      ↓
 responder iPhones (iMessage) ⇄ Photon Spectrum Cloud ⇄ imessage-agent (Node, this laptop)
 ```
@@ -74,13 +74,14 @@ The agent refuses to start without an allowlist or Photon credentials. Unregiste
 ```powershell
 cd imessage-agent
 $env:PATH = "..\tools\node;$env:PATH"
-..\tools\node\npm.cmd test          # 12 unit tests + 2 integration tests against a real backend
+..\tools\node\npm.cmd test          # 12 unit tests + 3 integration tests against a real backend
 ..\tools\node\npm.cmd run typecheck # strict TypeScript against the real spectrum-ts types
 ```
 
 The integration tests start the real GuideWing backend from the project `.venv` on a free port, with a temporary database and a 2-second cancellation window:
 - A simulated user presses Help through the API. Two responders are pushed the request after dispatch. Responder A accepts (the backend records the name), B is told and cannot accept or resolve it, and A resolves. Every push is sent once, and an unregistered number is refused.
 - Cancelled inside the window: nobody is told, and it stays cancelled after the deadline. Cancelled after dispatch: responders are told.
+- A voice-command request (`request_source: "voice"`) is pushed as "requested with a spoken voice command", then accepted and resolved by iMessage.
 
 ## Privacy and limits
 

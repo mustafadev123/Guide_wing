@@ -176,6 +176,8 @@ const SPEECH_STUB = () => {
 
   // ---- keyboard focus visible, accessible names --------------------------------------
   await user.keyboard.press("Tab"); await user.keyboard.press("Tab");
+  // Tabbing past the last control leaves the document (BODY); one more Tab re-enters at the skip link.
+  if (await user.evaluate(() => document.activeElement === document.body)) await user.keyboard.press("Tab");
   const focus = await user.evaluate(() => {
     const el = document.activeElement; const cs = getComputedStyle(el);
     return { tag: el.tagName, name: el.getAttribute("aria-label") || el.textContent.trim().slice(0, 40), outline: cs.outlineStyle + " " + cs.outlineWidth, shadow: cs.boxShadow };

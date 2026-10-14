@@ -54,11 +54,11 @@ after(() => {
 });
 
 /** The simulated user presses Help (same endpoint as the /user page). */
-async function userRequest(key: string) {
+async function userRequest(key: string, source: "button" | "voice" = "button") {
   const journey = (await api("GET", "/api/simulation/state?journey_id=current")).journey;
   if (journey.status === "idle") await api("POST", `/api/journeys/${journey.id}/start`);
   if (journey.status === "paused") await api("POST", `/api/journeys/${journey.id}/resume`);
-  return (await api("POST", "/api/incidents", { journey_id: journey.id, request_key: key, request_source: "button" })).incident;
+  return (await api("POST", "/api/incidents", { journey_id: journey.id, request_key: key, request_source: source })).incident;
 }
 
 async function setup() {
@@ -114,4 +114,18 @@ test("user cancellations: silent inside the window, pushed after dispatch", asyn
   await api("POST", `/api/incidents/${late.id}/cancel`);
   await until(() => sent[A]!.length === 2);
   assert.match(sent[A]![1]!, /^The user cancelled the request near .*No action needed\.$/);
+});
+
+test("a voice-command request reaches responders and is accepted and resolved through the same backend", async () => {
+  const { sent, text } = await setup();
+  await text(A, "list");
+  const incident = await userRequest("voice-it-request-4", "voice");
+  assert.equal(incident.request_source, "voice");
+  await until(() => sent[A]!.length === 1, 8000);
+  assert.match(sent[A]![0]!, /^New help request near .*, requested with a spoken voice command\. Reply ACCEPT/);
+  assert.match(await text(A, "accept"), /^You accepted the request/);
+  assert.equal((await api("GET", `/api/incidents/${incident.id}`)).status, "acknowledged");
+  assert.match(await text(A, "details"), /Requested with a spoken voice command\./);
+  assert.match(await text(A, "resolved"), /marked resolved/);
+  assert.equal((await api("GET", `/api/incidents/${incident.id}`)).status, "resolved");
 });

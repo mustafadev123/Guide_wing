@@ -207,7 +207,7 @@ def test_interpretation_facts_use_recorded_sources_cancel_stage_and_timing_distr
     selection = SummaryRequest()
     metrics = aggregate(rows, selection, clock.now())
     context = analysis_context(rows, selection, clock.now(), metrics)
-    assert context["request_sources"] == {"button": 2, "gesture": 2, "imessage": 0, "test": 0}
+    assert context["request_sources"] == {"button": 2, "gesture": 2, "imessage": 0, "voice": 0, "test": 0}
     assert context["cancelled_before_dispatch"] == context["cancelled_after_dispatch"] == 1
     assert context["resolved_share_percent"] == context["cancelled_share_percent"] == 50
     assert context["open_requests"] == 0
@@ -216,6 +216,17 @@ def test_interpretation_facts_use_recorded_sources_cancel_stage_and_timing_distr
     assert context["acceptance"]["slowest_minutes"] == 9.5
     assert context["resolution"]["sample"] == 1  # second resolution predates acceptance
 
+
+
+def test_voice_requests_are_counted_as_an_input_method(clock):
+    from backend.app.analytics import instant_sections
+    rows = [row(request_source="voice"), row(request_source="voice"), row()]
+    selection = SummaryRequest()
+    metrics = aggregate(rows, selection, clock.now())
+    context = analysis_context(rows, selection, clock.now(), metrics)
+    assert context["request_sources"]["voice"] == 2
+    overview = instant_sections({"metrics": metrics.model_dump(), "analysis": context}).overview
+    assert "2 voice commands" in overview and "1 open-palm gesture" in overview
 
 def test_numeric_report_accepts_only_numbers_present_in_server_facts():
     out = GeminiAnalytics("fake", "model", post=lambda *a: reply(
